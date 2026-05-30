@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { Play, Flame, User, Disc, Compass, Music, Sparkles } from 'lucide-react'
 import { usePlayerStore } from '../store/usePlayerStore'
@@ -54,184 +54,203 @@ export default function Home({ onOpenAuth }) {
 
   const currentBannerIdx = activeBanner >= displayBanners.length ? 0 : activeBanner
 
-  useEffect(() => {
-    const fetchHomeData = async () => {
-      setLoading(true)
+  const fetchHomeData = useCallback(async () => {
+    setLoading(true)
+    try {
+      // Fetch banners from DB
       try {
-        // Fetch banners from DB
-        try {
-          const { data: dbBanners } = await supabase
-            .from('banners')
-            .select('*')
-            .eq('is_active', true)
-          if (dbBanners && dbBanners.length > 0) {
-            setBanners(dbBanners.map(b => ({
-              title: b.title,
-              desc: b.link_url || "Konten Spesial Unggulan untuk Anda.",
-              bg: "from-primary to-accent",
-              cta: "Mulai Dengar",
-              cover: b.image_url
-            })))
-          }
-        } catch (e) {
-          console.warn("DB banners load failed:", e)
+        const { data: dbBanners } = await supabase
+          .from('banners')
+          .select('*')
+          .eq('is_active', true)
+        if (dbBanners && dbBanners.length > 0) {
+          setBanners(dbBanners.map(b => ({
+            title: b.title,
+            desc: b.link_url || "Konten Spesial Unggulan untuk Anda.",
+            bg: "from-primary to-accent",
+            cta: "Mulai Dengar",
+            cover: b.image_url
+          })))
         }
-
-        // Fetch latest songs
-        let dbLatest = []
-        try {
-          const { data: songs } = await supabase
-            .from('songs')
-            .select('*')
-            .eq('status', 'public')
-            .order('created_at', { ascending: false })
-            .limit(6)
-          dbLatest = songs || []
-        } catch (e) {
-          console.warn("DB latest songs load failed:", e)
-        }
-
-        // Fetch personalized recommendations
-        let dbRecs = []
-        try {
-          if (user) {
-            const { data: favs } = await supabase
-              .from('favorites')
-              .select('songs(*)')
-              .eq('user_id', user.id)
-              .limit(6)
-            
-            if (favs && favs.length > 0) {
-              dbRecs = favs.map(f => f.songs).filter(Boolean)
-            }
-          }
-          
-          if (dbRecs.length < 6) {
-            const { data: randSongs } = await supabase
-              .from('songs')
-              .select('*')
-              .eq('status', 'public')
-              .limit(10)
-            
-            const existingIds = new Set(dbRecs.map(s => s.id))
-            const additional = (randSongs || []).filter(s => !existingIds.has(s.id))
-            dbRecs = [...dbRecs, ...additional].slice(0, 6)
-          }
-        } catch (e) {
-          console.warn("DB recommendations load failed:", e)
-        }
-
-        const res = await fetch(`${MUSIC_SERVICE_URL}/home`)
-        if (!res.ok) throw new Error("Gagal mengambil data")
-        const json = await res.json()
-        
-        setData({
-          ...json,
-          latestSongs: dbLatest.map(s => ({
-            id: s.id,
-            title: s.title,
-            artist: s.artist,
-            coverUrl: s.cover_url || "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&q=80",
-            audioUrl: s.audio_url,
-            is_youtube: s.is_youtube,
-            videoId: s.video_id
-          })),
-          recommendations: dbRecs.map(s => ({
-            id: s.id,
-            title: s.title,
-            artist: s.artist,
-            coverUrl: s.cover_url || "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&q=80",
-            audioUrl: s.audio_url,
-            is_youtube: s.is_youtube,
-            videoId: s.video_id
-          }))
-        })
-      } catch (err) {
-        console.warn("FastAPI home service unavailable, using rich local fallback.", err)
-        
-        // Simple fallback mapping
-        setData({
-          trendingSongs: [
-            { id: "J2X5mJ3HDYE", title: "Lagu Santai Malam", artist: "Senja Musik", coverUrl: "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&q=80" },
-            { id: "kJQP7kiw5Fk", title: "Harmoni Alam", artist: "Rileksasi Project", coverUrl: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&q=80" },
-            { id: "9bZkp7q19f0", title: "Energi Pagi", artist: "Beat Boosters", coverUrl: "https://images.unsplash.com/photo-1507838153414-b4b713384a76?w=300&q=80" },
-            { id: "abc123song1", title: "Langkah Baru", artist: "Dika Pratama", coverUrl: "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&q=80" }
-          ],
-          popularArtists: [
-            { id: "UC2Xy...", name: "Pamungkas", photoUrl: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=300&q=80" },
-            { id: "UC3Yx...", name: "Tulus", photoUrl: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=300&q=80" },
-            { id: "UC4Zx...", name: "Isyana Sarasvati", photoUrl: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=300&q=80" },
-            { id: "UC5Yx...", name: "Hindia", photoUrl: "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300&q=80" }
-          ],
-          popularAlbums: [
-            { id: "album1", title: "Menari Dengan Bayangan", artist: "Hindia", coverUrl: "https://images.unsplash.com/photo-1487180142328-054b783fc471?w=300&q=80" },
-            { id: "album2", title: "Walk the Talk", artist: "Pamungkas", coverUrl: "https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?w=300&q=80" }
-          ],
-          latestSongs: [],
-          recommendations: []
-        })
-      } finally {
-        setLoading(false)
+      } catch (e) {
+        console.warn("DB banners load failed:", e)
       }
-    }
-    fetchHomeData()
-  }, [user])
 
-  useEffect(() => {
-    const fetchGenreSongs = async () => {
-      if (!selectedGenre) return
-      setGenreLoading(true)
+      // Fetch latest songs
+      let dbLatest = []
       try {
-        // Coba cari dari DB songs yang memiliki genre tersebut
-        const { data: dbSongs } = await supabase
+        const { data: songs } = await supabase
           .from('songs')
           .select('*')
           .eq('status', 'public')
-          .eq('genre', selectedGenre)
+          .order('created_at', { ascending: false })
           .limit(6)
+        dbLatest = songs || []
+      } catch (e) {
+        console.warn("DB latest songs load failed:", e)
+      }
 
-        let results = dbSongs ? dbSongs.map(s => ({
+      // Fetch personalized recommendations
+      let dbRecs = []
+      try {
+        if (user) {
+          const { data: favs } = await supabase
+            .from('favorites')
+            .select('songs(*)')
+            .eq('user_id', user.id)
+            .limit(6)
+          
+          if (favs && favs.length > 0) {
+            dbRecs = favs.map(f => f.songs).filter(Boolean)
+          }
+        }
+        
+        if (dbRecs.length < 6) {
+          const { data: randSongs } = await supabase
+            .from('songs')
+            .select('*')
+            .eq('status', 'public')
+            .limit(10)
+          
+          const existingIds = new Set(dbRecs.map(s => s.id))
+          const additional = (randSongs || []).filter(s => !existingIds.has(s.id))
+          dbRecs = [...dbRecs, ...additional].slice(0, 6)
+        }
+      } catch (e) {
+        console.warn("DB recommendations load failed:", e)
+      }
+
+      const res = await fetch(`${MUSIC_SERVICE_URL}/home`)
+      if (!res.ok) throw new Error("Gagal mengambil data")
+      const json = await res.json()
+      
+      setData({
+        ...json,
+        latestSongs: dbLatest.map(s => ({
           id: s.id,
           title: s.title,
           artist: s.artist,
           coverUrl: s.cover_url || "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&q=80",
           audioUrl: s.audio_url,
           is_youtube: s.is_youtube,
-          videoId: s.video_id,
-          genre: s.genre
-        })) : []
-
-        // Panggil API search dari YT Music untuk melengkapi data agar lebih aktual sesuai genre
-        const query = `${selectedGenre} lagu`
-        const res = await fetch(`${MUSIC_SERVICE_URL}/search?q=${encodeURIComponent(query)}&limit=10`)
-        if (res.ok) {
-          const ytResults = await res.json()
-          const ytSongs = (ytResults.results || ytResults || [])
-            .filter(s => s.id || s.videoId)
-            .map(s => ({
-              id: s.videoId || s.video_id || s.id,
-              title: s.title,
-              artist: s.artist || s.channel || 'YouTube Music',
-              coverUrl: s.coverUrl || s.thumbnail || s.cover_url || "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&q=80",
-              video_id: s.videoId || s.video_id || s.id,
-              videoId: s.videoId || s.video_id || s.id,
-              genre: selectedGenre,
-              is_youtube: true
-            }))
-          
-          const existingIds = new Set(results.map(r => r.videoId || r.id || r.video_id))
-          const additional = ytSongs.filter(s => !existingIds.has(s.videoId || s.id))
-          results = [...results, ...additional].slice(0, 6)
-        }
-        setGenreSongs(results)
-      } catch (err) {
-        console.warn("Gagal memuat lagu genre:", err)
-      } finally {
-        setGenreLoading(false)
-      }
+          videoId: s.video_id
+        })),
+        recommendations: dbRecs.map(s => ({
+          id: s.id,
+          title: s.title,
+          artist: s.artist,
+          coverUrl: s.cover_url || "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&q=80",
+          audioUrl: s.audio_url,
+          is_youtube: s.is_youtube,
+          videoId: s.video_id
+        }))
+      })
+    } catch (err) {
+      console.warn("FastAPI home service unavailable, using rich local fallback.", err)
+      
+      setData({
+        trendingSongs: [
+          { id: "J2X5mJ3HDYE", title: "Lagu Santai Malam", artist: "Senja Musik", coverUrl: "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&q=80" },
+          { id: "kJQP7kiw5Fk", title: "Harmoni Alam", artist: "Rileksasi Project", coverUrl: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&q=80" },
+          { id: "9bZkp7q19f0", title: "Energi Pagi", artist: "Beat Boosters", coverUrl: "https://images.unsplash.com/photo-1507838153414-b4b713384a76?w=300&q=80" },
+          { id: "abc123song1", title: "Langkah Baru", artist: "Dika Pratama", coverUrl: "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&q=80" }
+        ],
+        popularArtists: [
+          { id: "UC2Xy...", name: "Pamungkas", photoUrl: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=300&q=80" },
+          { id: "UC3Yx...", name: "Tulus", photoUrl: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=300&q=80" },
+          { id: "UC4Zx...", name: "Isyana Sarasvati", photoUrl: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=300&q=80" },
+          { id: "UC5Yx...", name: "Hindia", photoUrl: "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300&q=80" }
+        ],
+        popularAlbums: [
+          { id: "album1", title: "Menari Dengan Bayangan", artist: "Hindia", coverUrl: "https://images.unsplash.com/photo-1487180142328-054b783fc471?w=300&q=80" },
+          { id: "album2", title: "Walk the Talk", artist: "Pamungkas", coverUrl: "https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?w=300&q=80" }
+        ],
+        latestSongs: [],
+        recommendations: []
+      })
+    } finally {
+      setLoading(false)
     }
-    fetchGenreSongs()
+  }, [user])
+
+  const fetchGenreSongs = useCallback(async () => {
+    if (!selectedGenre) return
+    setGenreLoading(true)
+    try {
+      // Coba cari dari DB songs yang memiliki genre tersebut
+      const { data: dbSongs } = await supabase
+        .from('songs')
+        .select('*')
+        .eq('status', 'public')
+        .eq('genre', selectedGenre)
+        .limit(6)
+
+      let results = dbSongs ? dbSongs.map(s => ({
+        id: s.id,
+        title: s.title,
+        artist: s.artist,
+        coverUrl: s.cover_url || "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&q=80",
+        audioUrl: s.audio_url,
+        is_youtube: s.is_youtube,
+        videoId: s.video_id,
+        genre: s.genre
+      })) : []
+
+      // Panggil API search dari YT Music untuk melengkapi data agar lebih aktual sesuai genre
+      const query = `${selectedGenre} lagu`
+      const res = await fetch(`${MUSIC_SERVICE_URL}/search?q=${encodeURIComponent(query)}&limit=10`)
+      if (res.ok) {
+        const ytResults = await res.json()
+        const ytSongs = (ytResults.results || ytResults || [])
+          .filter(s => s.id || s.videoId)
+          .map(s => ({
+            id: s.videoId || s.video_id || s.id,
+            title: s.title,
+            artist: s.artist || s.channel || 'YouTube Music',
+            coverUrl: s.coverUrl || s.thumbnail || s.cover_url || "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&q=80",
+            video_id: s.videoId || s.video_id || s.id,
+            videoId: s.videoId || s.video_id || s.id,
+            genre: selectedGenre,
+            is_youtube: true
+          }))
+        
+        const existingIds = new Set(results.map(r => r.videoId || r.id || r.video_id))
+        const additional = ytSongs.filter(s => !existingIds.has(s.videoId || s.id))
+        results = [...results, ...additional].slice(0, 6)
+      }
+      setGenreSongs(results)
+    } catch (err) {
+      console.warn("Gagal memuat lagu genre:", err)
+    } finally {
+      setGenreLoading(false)
+    }
   }, [selectedGenre])
+
+  useEffect(() => {
+    fetchHomeData()
+  }, [fetchHomeData])
+
+  useEffect(() => {
+    fetchGenreSongs()
+  }, [fetchGenreSongs])
+
+  // Listen to realtime updates for songs and banners to refresh home content instantly
+  useEffect(() => {
+    const homeChannel = supabase
+      .channel('home-realtime-channel')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'songs' }, () => {
+        fetchHomeData()
+        fetchGenreSongs()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'banners' }, () => {
+        fetchHomeData()
+      })
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(homeChannel)
+    }
+  }, [fetchHomeData, fetchGenreSongs])
 
   const handlePlaySong = (song, songsList) => {
     if (!user) {

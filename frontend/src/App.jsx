@@ -154,6 +154,28 @@ export default function App() {
     }
   }, [user])
 
+  // Real-time listener for current user's profile updates (e.g. premium status changes)
+  useEffect(() => {
+    if (!user) return
+
+    const profileChannel = supabase
+      .channel(`public:profiles:${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${user.id}` },
+        (payload) => {
+          console.log('Realtime profile update received:', payload.new)
+          useAuthStore.setState({ profile: payload.new })
+          useToastStore.getState().showToast('Status premium Anda berhasil diperbarui!', 'success')
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(profileChannel)
+    }
+  }, [user])
+
   const handleMarkNotifAsRead = async () => {
     setHasUnreadNotif(false)
     if (!user) return

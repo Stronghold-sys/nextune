@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Plus, Play, Disc, Heart, Clock, Trash2, Share2, Download } from 'lucide-react'
 import { supabase } from '../supabaseClient'
 import { useAuthStore } from '../store/useAuthStore'
@@ -43,74 +43,94 @@ export default function Library({ onOpenAuth }) {
   }
 
   // Load and subscribe to database library items safely
-  useEffect(() => {
-    let isCurrent = true
-
-    const loadData = async () => {
-      if (!user) {
-        if (isCurrent) {
-          setPlaylists([
-            { id: "mock-p1", name: "Lagu Santai Kerja", description: "Playlist musik akustik tenang", cover_url: "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&q=80" },
-            { id: "mock-p2", name: "Workout Hits", description: "Lagu penambah energi olahraga", cover_url: "https://images.unsplash.com/photo-1507838153414-b4b713384a76?w=300&q=80" }
-          ])
-          setFavorites([
-            { id: "J2X5mJ3HDYE", title: "Lagu Santai Senja", artist: "Senja Musik", coverUrl: "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&q=80" }
-          ])
-          setPlayHistory([
-            { id: "kJQP7kiw5Fk", title: "Harmoni Alam", artist: "Rileksasi Project", coverUrl: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&q=80" }
-          ])
-        }
-        return
-      }
-
-      try {
-        const { data: playlistsData } = await supabase
-          .from('playlists')
-          .select('*')
-          .eq('created_by', user.id)
-          .order('created_at', { ascending: false })
-        
-        if (isCurrent) setPlaylists(playlistsData || [])
-
-        const { data: favsData } = await supabase
-          .from('favorites')
-          .select(`
-            id,
-            songs (
-              id, title, artist, cover_url, audio_url, is_youtube, video_id, duration_seconds
-            )
-          `)
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-
-        const mappedFavs = (favsData || []).map(f => f.songs).filter(Boolean)
-        if (isCurrent) setFavorites(mappedFavs)
-
-        const { data: historyData } = await supabase
-          .from('play_history')
-          .select(`
-            id,
-            songs (
-              id, title, artist, cover_url, audio_url, is_youtube, video_id, duration_seconds
-            )
-          `)
-          .eq('user_id', user.id)
-          .order('played_at', { ascending: false })
-          .limit(20)
-
-        const mappedHistory = (historyData || []).map(h => h.songs).filter(Boolean)
-        if (isCurrent) setPlayHistory(mappedHistory)
-      } catch (err) {
-        console.error("Error loading library details:", err)
-      }
+  const loadData = useCallback(async () => {
+    if (!user) {
+      setPlaylists([
+        { id: "mock-p1", name: "Lagu Santai Kerja", description: "Playlist musik akustik tenang", cover_url: "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&q=80" },
+        { id: "mock-p2", name: "Workout Hits", description: "Lagu penambah energi olahraga", cover_url: "https://images.unsplash.com/photo-1507838153414-b4b713384a76?w=300&q=80" }
+      ])
+      setFavorites([
+        { id: "J2X5mJ3HDYE", title: "Lagu Santai Senja", artist: "Senja Musik", coverUrl: "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&q=80" }
+      ])
+      setPlayHistory([
+        { id: "kJQP7kiw5Fk", title: "Harmoni Alam", artist: "Rileksasi Project", coverUrl: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&q=80" }
+      ])
+      return
     }
 
-    loadData()
+    try {
+      const { data: playlistsData } = await supabase
+        .from('playlists')
+        .select('*')
+        .eq('created_by', user.id)
+        .order('created_at', { ascending: false })
+      
+      setPlaylists(playlistsData || [])
 
-    return () => {
-      isCurrent = false
+      const { data: favsData } = await supabase
+        .from('favorites')
+        .select(`
+          id,
+          songs (
+            id, title, artist, cover_url, audio_url, is_youtube, video_id, duration_seconds
+          )
+        `)
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+
+      const mappedFavs = (favsData || []).map(f => f.songs).filter(Boolean)
+      setFavorites(mappedFavs)
+
+      const { data: historyData } = await supabase
+        .from('play_history')
+        .select(`
+          id,
+          songs (
+            id, title, artist, cover_url, audio_url, is_youtube, video_id, duration_seconds
+          )
+        `)
+        .eq('user_id', user.id)
+        .order('played_at', { ascending: false })
+        .limit(20)
+
+      const mappedHistory = (historyData || []).map(h => h.songs).filter(Boolean)
+      setPlayHistory(mappedHistory)
+    } catch (err) {
+      console.error("Error loading library details:", err)
     }
   }, [user])
+
+  useEffect(() => {
+    loadData()
+  }, [loadData])
+
+  // Real-time listener for library modifications (playlists, favorites, play history)
+  useEffect(() => {
+    if (!user) return
+
+    const libraryChannel = supabase
+      .channel(`library-realtime-${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'playlists', filter: `created_by=eq.${user.id}` },
+        () => { loadData() }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'favorites', filter: `user_id=eq.${user.id}` },
+        () => { loadData() }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'play_history', filter: `user_id=eq.${user.id}` },
+        () => { loadData() }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(libraryChannel)
+    }
+  }, [user, loadData])
 
   useEffect(() => {
     const handleTabChange = (e) => {

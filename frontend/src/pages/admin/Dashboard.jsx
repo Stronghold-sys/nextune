@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
   LayoutDashboard, Users, Music, Disc, UserCheck, Image, Bell, CreditCard, 
@@ -82,97 +82,114 @@ export default function Dashboard() {
   const [newGenreName, setNewGenreName] = useState("")
 
   // Fetch admin data on admin authorization safely
-  useEffect(() => {
-    let isCurrent = true
+  const loadAdminData = useCallback(async () => {
+    if (!isAdmin) return
+    
+    try {
+      // 1. Fetch Users
+      const { data: users } = await supabase.from('profiles').select('*')
+      setUserList(users || [])
 
-    const loadAdminData = async () => {
-      if (!isAdmin) return
-      
-      try {
-        // 1. Fetch Users
-        const { data: users } = await supabase.from('profiles').select('*')
-        if (isCurrent) setUserList(users || [])
+      // 2. Fetch Songs
+      const { data: songs } = await supabase.from('songs').select('*').order('created_at', { ascending: false })
+      setSongList(songs || [])
 
-        // 2. Fetch Songs
-        const { data: songs } = await supabase.from('songs').select('*').order('created_at', { ascending: false })
-        if (isCurrent) setSongList(songs || [])
+      // 3. Fetch Albums
+      const { data: albums } = await supabase.from('playlists').select('*').eq('is_featured', true) // simulated albums
+      setAlbumList(albums || [
+        { id: "alb-1", name: "Menari Dengan Bayangan", description: "Hindia", cover_url: "https://images.unsplash.com/photo-1487180142328-054b783fc471?w=300&q=80" },
+        { id: "alb-2", name: "Walk the Talk", description: "Pamungkas", cover_url: "https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?w=300&q=80" }
+      ])
 
-        // 3. Fetch Albums
-        const { data: albums } = await supabase.from('playlists').select('*').eq('is_featured', true) // simulated albums
-        if (isCurrent) setAlbumList(albums || [
-          { id: "alb-1", name: "Menari Dengan Bayangan", description: "Hindia", cover_url: "https://images.unsplash.com/photo-1487180142328-054b783fc471?w=300&q=80" },
-          { id: "alb-2", name: "Walk the Talk", description: "Pamungkas", cover_url: "https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?w=300&q=80" }
-        ])
+      // 4. Fetch Artists
+      setArtistList([
+        { id: "art-1", name: "Pamungkas", photoUrl: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=300&q=80", bio: "Artis Indie Pop Indonesia", genre: "Pop" },
+        { id: "art-2", name: "Tulus", photoUrl: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=300&q=80", bio: "Penyanyi & Penulis Lagu Populer", genre: "Jazz / Pop" }
+      ])
 
-        // 4. Fetch Artists
-        if (isCurrent) {
-          setArtistList([
-            { id: "art-1", name: "Pamungkas", photoUrl: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=300&q=80", bio: "Artis Indie Pop Indonesia", genre: "Pop" },
-            { id: "art-2", name: "Tulus", photoUrl: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=300&q=80", bio: "Penyanyi & Penulis Lagu Populer", genre: "Jazz / Pop" }
-          ])
-        }
+      // 5. Fetch Playlists
+      const { data: playlists } = await supabase.from('playlists').select('*')
+      setPlaylistList(playlists || [])
 
-        // 5. Fetch Playlists
-        const { data: playlists } = await supabase.from('playlists').select('*')
-        if (isCurrent) setPlaylistList(playlists || [])
+      // 6. Fetch Banners
+      const { data: banners } = await supabase.from('banners').select('*')
+      setBannerList(banners || [])
 
-        // 6. Fetch Banners
-        const { data: banners } = await supabase.from('banners').select('*')
-        if (isCurrent) setBannerList(banners || [])
+      // 7. Fetch Genres
+      setGenreList([
+        { id: "gen-1", name: "Pop", isFeatured: true },
+        { id: "gen-2", name: "Rock", isFeatured: true },
+        { id: "gen-3", name: "Hip Hop", isFeatured: false },
+        { id: "gen-4", name: "Jazz", isFeatured: false }
+      ])
 
-        // 7. Fetch Genres
-        if (isCurrent) {
-          setGenreList([
-            { id: "gen-1", name: "Pop", isFeatured: true },
-            { id: "gen-2", name: "Rock", isFeatured: true },
-            { id: "gen-3", name: "Hip Hop", isFeatured: false },
-            { id: "gen-4", name: "Jazz", isFeatured: false }
-          ])
-        }
+      // 8. Fetch Premium Transactions
+      const { data: tx } = await supabase
+        .from('transactions')
+        .select(`
+          id,
+          amount,
+          status,
+          payment_method,
+          created_at,
+          profiles (
+            username,
+            full_name,
+            email
+          ),
+          premium_packages (
+            name
+          )
+        `)
+        .order('created_at', { ascending: false })
+      setTransactionList(tx || [
+        { id: "tx-1", profiles: { email: "rahmatakbar2088@gmail.com" }, premium_packages: { name: "Bulanan Premium" }, amount: 49000, status: "completed", date: "30 May 2026" },
+        { id: "tx-2", profiles: { email: "budi@gmail.com" }, premium_packages: { name: "Tahunan Premium" }, amount: 299000, status: "completed", date: "29 May 2026" }
+      ])
 
-        // 8. Fetch Premium Transactions
-        const { data: tx } = await supabase
-          .from('transactions')
-          .select(`
-            id,
-            amount,
-            status,
-            payment_method,
-            created_at,
-            profiles (
-              username,
-              full_name,
-              email
-            ),
-            premium_packages (
-              name
-            )
-          `)
-          .order('created_at', { ascending: false })
-        if (isCurrent) {
-          setTransactionList(tx || [
-            { id: "tx-1", profiles: { email: "rahmatakbar2088@gmail.com" }, premium_packages: { name: "Bulanan Premium" }, amount: 49000, status: "completed", date: "30 May 2026" },
-            { id: "tx-2", profiles: { email: "budi@gmail.com" }, premium_packages: { name: "Tahunan Premium" }, amount: 299000, status: "completed", date: "29 May 2026" }
-          ])
-        }
-
-        // 9. Fetch Vouchers
-        const { data: vList } = await supabase
-          .from('vouchers')
-          .select('*')
-          .order('created_at', { ascending: false })
-        if (isCurrent) setVouchersList(vList || [])
-      } catch (e) {
-        console.error("Error loading admin data: ", e)
-      }
-    }
-
-    loadAdminData()
-
-    return () => {
-      isCurrent = false
+      // 9. Fetch Vouchers
+      const { data: vList } = await supabase
+        .from('vouchers')
+        .select('*')
+        .order('created_at', { ascending: false })
+      setVouchersList(vList || [])
+    } catch (e) {
+      console.error("Error loading admin data: ", e)
     }
   }, [isAdmin])
+
+  useEffect(() => {
+    loadAdminData()
+
+    if (!isAdmin) return
+
+    // Set up Realtime subscriptions for all admin tables to keep dashboard fully synced
+    const adminChannel = supabase
+      .channel('admin-realtime-channel')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => {
+        loadAdminData()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'songs' }, () => {
+        loadAdminData()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'playlists' }, () => {
+        loadAdminData()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'banners' }, () => {
+        loadAdminData()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, () => {
+        loadAdminData()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vouchers' }, () => {
+        loadAdminData()
+      })
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(adminChannel)
+    }
+  }, [isAdmin, loadAdminData])
 
   const handleAdminLogin = async (e) => {
     e.preventDefault()

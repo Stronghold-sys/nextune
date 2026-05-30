@@ -85,3 +85,73 @@ BEGIN
     END IF;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 4. Enable Supabase Realtime for all public tables safely
+CREATE PUBLICATION IF NOT EXISTS supabase_realtime;
+
+DO $$
+BEGIN
+    -- profiles
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_publication_tables 
+        WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'profiles'
+    ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.profiles;
+    END IF;
+
+    -- songs
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_publication_tables 
+        WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'songs'
+    ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.songs;
+    END IF;
+
+    -- playlists
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_publication_tables 
+        WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'playlists'
+    ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.playlists;
+    END IF;
+
+    -- favorites
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_publication_tables 
+        WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'favorites'
+    ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.favorites;
+    END IF;
+
+    -- play_history
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_publication_tables 
+        WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'play_history'
+    ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.play_history;
+    END IF;
+
+    -- transactions
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_publication_tables 
+        WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'transactions'
+    ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.transactions;
+    END IF;
+
+    -- vouchers
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_publication_tables 
+        WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'vouchers'
+    ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.vouchers;
+    END IF;
+
+    -- banners
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_publication_tables 
+        WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'banners'
+    ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.banners;
+    END IF;
+END $$;

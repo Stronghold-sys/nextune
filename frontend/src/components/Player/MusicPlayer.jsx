@@ -190,7 +190,7 @@ export default function MusicPlayer() {
       {/* 1. PERSISTENT MINI PLAYER BAR (Desktop Bottom, Mobile Anchor) */}
       <div 
         onClick={() => setIsMobileExpanded(true)}
-        className="fixed bottom-[60px] sm:bottom-0 left-0 right-0 h-16 sm:h-20 bg-background-player/95 border-t border-gray-border/60 backdrop-blur-lg z-40 px-4 sm:px-6 flex items-center justify-between cursor-pointer sm:cursor-default shadow-2xl select-none"
+        className="fixed bottom-[64px] sm:bottom-0 left-0 right-0 h-16 sm:h-20 bg-background-player/95 border-t border-gray-border/60 backdrop-blur-lg z-40 px-4 sm:px-6 flex items-center justify-between cursor-pointer sm:cursor-default shadow-2xl select-none"
       >
         {/* Cover Art and Metadata */}
         <div className="flex items-center gap-3 min-w-0 flex-1 sm:flex-initial">
@@ -460,7 +460,7 @@ export default function MusicPlayer() {
             animate={{ y: 0 }}
             exit={{ y: "100%" }}
             transition={{ type: "spring", damping: 25, stiffness: 220 }}
-            className="fixed inset-0 bg-background z-50 flex flex-col justify-between p-6 overflow-hidden select-none sm:hidden"
+            className="fixed inset-0 bg-background z-50 flex flex-col justify-between p-4 overflow-hidden select-none sm:hidden"
           >
             {/* Blurry Album Art Background Layer */}
             <div className="absolute inset-0 z-0 opacity-20 filter blur-3xl pointer-events-none scale-125">
@@ -468,16 +468,16 @@ export default function MusicPlayer() {
             </div>
 
             {/* Header: Collapse button and titles */}
-            <div className="flex items-center justify-between z-10">
+            <div className="flex items-center justify-between z-10 shrink-0">
               <button 
-                onClick={() => setIsMobileExpanded(false)}
+                onClick={(e) => { e.stopPropagation(); setIsMobileExpanded(false); }}
                 className="p-1 hover:text-white text-gray-text"
               >
                 <ChevronDown className="w-7 h-7" />
               </button>
               <span className="text-[10px] font-bold uppercase tracking-wider text-gray-text">Sedang Diputar</span>
               <button 
-                onClick={() => setIsQueueOpen(!isQueueOpen)} 
+                onClick={(e) => { e.stopPropagation(); setIsQueueOpen(!isQueueOpen); }} 
                 className="p-1 text-gray-text"
               >
                 <ListMusic className="w-6 h-6" />
@@ -485,17 +485,17 @@ export default function MusicPlayer() {
             </div>
 
             {/* Album Cover Display */}
-            <div className="flex-1 flex flex-col justify-center items-center py-6 z-10">
+            <div className="flex-1 flex flex-col justify-center items-center py-2 z-10">
               <motion.div 
                 layoutId="expanded-cover"
-                className="w-56 h-56 rounded-2xl overflow-hidden shadow-2xl border border-gray-border/50 relative"
+                className="w-44 h-44 rounded-2xl overflow-hidden shadow-2xl border border-gray-border/50 relative"
               >
                 <img src={currentCover} alt={currentSong.title} className="w-full h-full object-cover" />
               </motion.div>
             </div>
 
             {/* Metadata (Title / Artist) and Sync Lyrics Box */}
-            <div className="space-y-4 z-10 flex flex-col">
+            <div className="space-y-2 z-10 flex flex-col">
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="text-lg font-bold text-white tracking-tight">{currentSong.title}</h2>
@@ -539,7 +539,7 @@ export default function MusicPlayer() {
               </div>
 
               {/* Synchronized Lyrics Container (Scroll Box) */}
-              <div className="h-28 overflow-y-auto no-scrollbar mask-gradient flex flex-col py-2 border-t border-b border-gray-border/20 text-center font-medium">
+              <div className="h-20 overflow-y-auto no-scrollbar mask-gradient flex flex-col py-1 border-t border-b border-gray-border/20 text-center font-medium">
                 {lyrics.map((line, idx) => {
                   const isActive = progress >= line.time && (idx === lyrics.length - 1 || progress < lyrics[idx + 1].time)
                   return (
@@ -556,7 +556,7 @@ export default function MusicPlayer() {
             </div>
 
             {/* Audio Seek and Timeline */}
-            <div className="space-y-2 z-10 pt-4">
+            <div className="space-y-2 z-10 pt-2">
               <div className="w-full flex items-center gap-3 text-[10px] text-gray-text font-mono">
                 <span>{formatTime(progress)}</span>
                 <input 
@@ -572,7 +572,7 @@ export default function MusicPlayer() {
             </div>
 
             {/* Main playback control row */}
-            <div className="flex items-center justify-between z-10 py-4 px-2">
+            <div className="flex items-center justify-between z-10 py-2 px-2">
               <button 
                 onClick={() => setShuffle(!shuffle)}
                 className={`p-1.5 transition-colors ${shuffle ? 'text-primary' : 'text-gray-text'}`}

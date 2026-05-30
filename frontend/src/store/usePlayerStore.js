@@ -829,7 +829,7 @@ export const usePlayerStore = create((set, get) => {
         } else {
           set({ lyrics: getFallbackLyrics(song), isLyricsSynced: false })
         }
-      } catch (_err) {
+      } catch {
         console.warn("Gagal memuat lirik dari database")
         set({ lyrics: getFallbackLyrics(song), isLyricsSynced: false })
       }

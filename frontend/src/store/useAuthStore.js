@@ -187,16 +187,13 @@ export const useAuthStore = create((set, get) => ({
     if (!user) return { success: false, error: 'User not logged in' }
     
     try {
-      const updates = {
-        id: user.id,
-        full_name: fullName,
-        avatar_url: avatarUrl,
-        updated_at: new Date()
-      }
-
       const { error } = await supabase
         .from('profiles')
-        .upsert(updates)
+        .update({
+          full_name: fullName,
+          avatar_url: avatarUrl
+        })
+        .eq('id', user.id)
 
       if (error) throw error
 

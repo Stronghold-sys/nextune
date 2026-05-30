@@ -392,7 +392,9 @@ async function fetchRecommendedSongs(currentSong, currentQueue, count = 5) {
       try {
         const { data } = await supabase.from('songs').select('genre').eq('video_id', videoId).maybeSingle()
         if (data?.genre) targetGenre = data.genre
-      } catch {}
+      } catch (err) {
+        console.warn("Failed to fetch target genre:", err)
+      }
     }
   }
 
@@ -501,11 +503,6 @@ async function fetchRecommendedSongs(currentSong, currentQueue, count = 5) {
   return results
 }
 
-// Kompatibel ke belakang - mengembalikan satu lagu saja
-async function fetchRecommendedSong(currentSong, currentQueue) {
-  const songs = await fetchRecommendedSongs(currentSong, currentQueue, 5)
-  return songs.length > 0 ? songs[0] : null
-}
 
 function parseLyricsContent(content, duration) {
   if (!content) return []
@@ -1024,7 +1021,9 @@ export const usePlayerStore = create((set, get) => {
               .eq('video_id', ytId)
               .maybeSingle()
             if (dbSong) dbSongId = dbSong.id
-          } catch {}
+          } catch (err) {
+            console.warn("Failed to lookup song by video ID:", err)
+          }
         }
       }
 
@@ -1042,8 +1041,8 @@ export const usePlayerStore = create((set, get) => {
             set({ lyrics: parsed, isLyricsSynced: data.is_synced || false })
             return // Lirik dari DB berhasil dimuat
           }
-        } catch {
-          // Lanjut ke sumber berikutnya
+        } catch (err) {
+          console.warn("Failed to load lyrics from database:", err)
         }
       }
 

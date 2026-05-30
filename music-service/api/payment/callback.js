@@ -3,11 +3,11 @@ const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 
 async function sendReceiptEmail({ email, username, packageName, amount, merchantOrderId, days }) {
-  const smtpHost = process.env.SMTP_HOST || 'mail.nextune.my.id';
-  const smtpPort = parseInt(process.env.SMTP_PORT || '465');
-  const smtpUser = process.env.SMTP_USER || 'noreply@nextune.my.id';
+  const smtpHost = process.env.SMTP_HOST || 'smtp.resend.com';
+  const smtpPort = parseInt(process.env.SMTP_PORT || '587');
+  const smtpUser = process.env.SMTP_USER || 'resend';
   const smtpPass = process.env.SMTP_PASS;
-  const smtpFrom = process.env.SMTP_FROM || smtpUser || 'noreply@nextune.my.id';
+  const smtpFrom = process.env.SMTP_FROM || `"NexTune" <noreply@nextune.my.id>`;
 
   if (!smtpPass) {
     console.warn("SMTP credentials not configured (SMTP_PASS is missing). Email receipt log:");
@@ -20,12 +20,12 @@ async function sendReceiptEmail({ email, username, packageName, amount, merchant
           recipient_email: email,
           subject: 'Pembayaran Berhasil! Selamat Datang di NexTune Premium',
           status: 'failed',
-          error_message: 'SMTP credentials not configured (SMTP_PASS is missing on server)'
+          error_message: 'SMTP_PASS belum dikonfigurasi di Vercel. Salin password dari Supabase SMTP Settings (klik tombol Reveal di screenshot Anda) lalu pasang sebagai SMTP_PASS di Vercel.'
         });
       
       await supabase
         .from('transactions')
-        .update({ notes: 'Gagal kirim email: Variabel SMTP_PASS belum dikonfigurasi di dashboard server.' })
+        .update({ notes: 'Gagal kirim email: SMTP_PASS belum diatur di Vercel. Silakan salin password dari Supabase SMTP Settings (klik tombol Reveal di screenshot Anda) ke env Vercel.' })
         .eq('id', merchantOrderId);
     } catch (dbErr) {
       console.warn("Gagal menyimpan log email ke database:", dbErr.message);

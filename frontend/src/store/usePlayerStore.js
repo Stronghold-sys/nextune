@@ -269,7 +269,6 @@ function initYouTubePlayer() {
             
             if ((e.data === 101 || e.data === 150 || e.data === 100) && store.currentSong) {
               console.log("Mencoba mencari video alternatif karena pemutaran diblokir/tidak didukung...")
-              useToastStore.getState().showToast("Mencoba memutar versi alternatif karena restriksi YouTube...", "info", 4000)
               store.playAlternativeYoutubeVideo(store.currentSong)
               return
             }
@@ -513,7 +512,10 @@ async function fetchRecommendedSongs(currentSong, currentQueue, count = 5) {
         if (res.ok) {
           const ytResults = await res.json()
           const ytSongs = (ytResults.results || ytResults || [])
-            .filter(s => s.id || s.videoId)
+            .filter(s => {
+              const vid = s.videoId || s.video_id || s.id
+              return vid && vid.length === 11 && s.type === 'song'
+            })
             .map(s => {
               const videoId = s.videoId || s.video_id || s.id
               return {
@@ -837,7 +839,7 @@ export const usePlayerStore = create((set, get) => {
           
           const alternativeVideo = results.find(item => {
             const vidId = item.videoId || item.video_id || item.id
-            return vidId && vidId.length === 11 && !failedVideoIds.includes(vidId)
+            return vidId && vidId.length === 11 && item.type === 'song' && !failedVideoIds.includes(vidId)
           })
           
           if (alternativeVideo) {

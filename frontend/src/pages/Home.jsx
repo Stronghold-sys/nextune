@@ -202,7 +202,10 @@ export default function Home({ onOpenAuth }) {
       if (res.ok) {
         const ytResults = await res.json()
         const ytSongs = (ytResults.results || ytResults || [])
-          .filter(s => s.id || s.videoId)
+          .filter(s => {
+            const vid = s.videoId || s.video_id || s.id;
+            return vid && vid.length === 11 && s.type === 'song';
+          })
           .map(s => ({
             id: s.videoId || s.video_id || s.id,
             title: s.title,

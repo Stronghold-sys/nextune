@@ -35,7 +35,7 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: 'Missing required callback parameters' });
     }
 
-    const apiKey = process.env.DUITKU_API_KEY || '858b73f2c5d1d6438a3d13a17e089201';
+    const apiKey = process.env.DUITKU_API_KEY || 'a9944612d52835f796f330f6b40e25fa';
 
     // Verify Duitku signature
     // Duitku v2 standard signature can be MD5 or SHA256 depending on sandbox settings.

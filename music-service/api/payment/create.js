@@ -52,8 +52,8 @@ module.exports = async (req, res) => {
     const merchantOrderId = 'INV-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
 
     // Duitku credentials (default sandbox)
-    const merchantCode = process.env.DUITKU_MERCHANT_CODE || 'DS18260';
-    const apiKey = process.env.DUITKU_API_KEY || '858b73f2c5d1d6438a3d13a17e089201';
+    const merchantCode = process.env.DUITKU_MERCHANT_CODE || 'DS31208';
+    const apiKey = process.env.DUITKU_API_KEY || 'a9944612d52835f796f330f6b40e25fa';
     
     // 3. Compute Inquiry signature (v2)
     // Signature = SHA256(merchantCode + merchantOrderId + paymentAmount + apiKey)

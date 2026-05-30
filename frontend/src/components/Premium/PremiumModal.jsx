@@ -195,7 +195,7 @@ export default function PremiumModal({ isOpen, onClose }) {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          merchantCode: 'DS18260',
+          merchantCode: 'DS31208',
           amount: duitkuTx.amount,
           merchantOrderId: duitkuTx.merchantOrderId,
           productDetails: selectedPkg.name,

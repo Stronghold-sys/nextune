@@ -180,7 +180,9 @@ export default function Dashboard() {
   }, [isAdmin])
 
   useEffect(() => {
-    loadAdminData()
+    Promise.resolve().then(() => {
+      loadAdminData()
+    })
 
     if (!isAdmin) return
 

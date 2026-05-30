@@ -227,11 +227,15 @@ export default function Home({ onOpenAuth }) {
   }, [selectedGenre])
 
   useEffect(() => {
-    fetchHomeData()
+    Promise.resolve().then(() => {
+      fetchHomeData()
+    })
   }, [fetchHomeData])
 
   useEffect(() => {
-    fetchGenreSongs()
+    Promise.resolve().then(() => {
+      fetchGenreSongs()
+    })
   }, [fetchGenreSongs])
 
   // Listen to realtime updates for songs and banners to refresh home content instantly

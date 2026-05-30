@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Compass, Search as SearchIcon, Library as LibIcon, User, ShieldAlert, Bell, X, Settings } from 'lucide-react'
+import { Compass, Search as SearchIcon, Library as LibIcon, User, ShieldAlert, Bell, X, Settings, Clock } from 'lucide-react'
 import { useAuthStore, checkIsPremium } from './store/useAuthStore'
 import { usePlayerStore } from './store/usePlayerStore'
 import { supabase } from './supabaseClient'
+import { useToastStore } from './store/useToastStore'
 
 // Pages
 import SplashScreen from './pages/SplashScreen'
@@ -28,8 +29,55 @@ export default function App() {
   const [authModalState, setAuthModalState] = useState({ isOpen: false, defaultMode: 'login' })
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isPremiumModalOpen, setIsPremiumModalOpen] = useState(false)
+  const [activeLibraryTab, setActiveLibraryTab] = useState("playlists")
 
   const isPremium = checkIsPremium(profile)
+
+  const lastUserRef = useRef(null)
+
+  // Sync active library tab from Library component
+  useEffect(() => {
+    const handleSync = (e) => {
+      if (e.detail) {
+        setActiveLibraryTab(e.detail)
+      }
+    }
+    window.addEventListener('change-library-tab-sync', handleSync)
+    return () => {
+      window.removeEventListener('change-library-tab-sync', handleSync)
+    }
+  }, [])
+
+  // Resume playback prompt when user logs in
+  useEffect(() => {
+    if (user && !lastUserRef.current) {
+      const lastSongStr = localStorage.getItem('nextune_last_played_song')
+      if (lastSongStr) {
+        try {
+          const lastSong = JSON.parse(lastSongStr)
+          const lastProgress = parseFloat(localStorage.getItem('nextune_last_played_progress') || '0')
+          
+          setTimeout(() => {
+            useToastStore.getState().showConfirm(
+              `Apakah Anda ingin melanjutkan memutar lagu "${lastSong.title}" yang diputar sebelumnya?`,
+              () => {
+                const { playSong } = usePlayerStore.getState()
+                playSong(lastSong, null, lastProgress)
+              },
+              () => {
+                // Clear to avoid prompting again
+                localStorage.removeItem('nextune_last_played_song')
+                localStorage.removeItem('nextune_last_played_progress')
+              }
+            )
+          }, 1500)
+        } catch (err) {
+          console.warn("Gagal membaca lagu terakhir:", err)
+        }
+      }
+    }
+    lastUserRef.current = user
+  }, [user])
 
   useEffect(() => {
     const handlePremiumRequired = () => {
@@ -127,6 +175,18 @@ export default function App() {
     window.dispatchEvent(new CustomEvent('collapse-player'))
     if (page === 'admin') {
       setCurrentPage('admin')
+      return
+    }
+    if (page === 'library') {
+      setCurrentPage('library')
+      window.dispatchEvent(new CustomEvent('change-library-tab', { detail: 'playlists' }))
+      return
+    }
+    if (page === 'history') {
+      setCurrentPage('library')
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('change-library-tab', { detail: 'history' }))
+      }, 50)
       return
     }
     setCurrentPage(page)
@@ -319,10 +379,15 @@ export default function App() {
           { id: "home", label: "Beranda", icon: Compass },
           { id: "search", label: "Cari", icon: SearchIcon },
           { id: "library", label: "Koleksi", icon: LibIcon },
+          { id: "history", label: "Riwayat", icon: Clock },
           { id: "profile", label: "Profil", icon: User }
         ].map(item => {
           const Icon = item.icon
-          const isActive = currentPage === item.id
+          const isActive = item.id === 'library' 
+            ? (currentPage === 'library' && activeLibraryTab !== 'history')
+            : item.id === 'history'
+              ? (currentPage === 'library' && activeLibraryTab === 'history')
+              : currentPage === item.id
           return (
             <button
               key={item.id}

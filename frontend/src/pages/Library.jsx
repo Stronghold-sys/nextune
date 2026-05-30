@@ -112,6 +112,22 @@ export default function Library({ onOpenAuth }) {
     }
   }, [user])
 
+  useEffect(() => {
+    const handleTabChange = (e) => {
+      if (e.detail) {
+        setActiveTab(e.detail)
+      }
+    }
+    window.addEventListener('change-library-tab', handleTabChange)
+    return () => {
+      window.removeEventListener('change-library-tab', handleTabChange)
+    }
+  }, [])
+
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('change-library-tab-sync', { detail: activeTab }))
+  }, [activeTab])
+
   const handleCreatePlaylistSubmit = async (e) => {
     e.preventDefault()
     if (!playlistName.trim()) return

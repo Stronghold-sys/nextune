@@ -132,6 +132,12 @@ function setupAudioElementListeners(audioElement) {
       window.dispatchEvent(new CustomEvent('premium-required', { detail: { reason: '30s_limit' } }))
     } else {
       usePlayerStore.setState({ progress: audioElement.currentTime })
+      
+      // Save progress to localStorage (at most once per second)
+      const lastSavedTime = parseFloat(localStorage.getItem('nextune_last_played_progress') || '0')
+      if (Math.abs(audioElement.currentTime - lastSavedTime) >= 1) {
+        localStorage.setItem('nextune_last_played_progress', audioElement.currentTime.toString())
+      }
     }
   })
 
@@ -291,6 +297,12 @@ function startYtProgressTimer() {
         window.dispatchEvent(new CustomEvent('premium-required', { detail: { reason: '30s_limit' } }))
       } else {
         usePlayerStore.setState({ progress: currentTime, duration })
+        
+        // Save progress to localStorage (at most once per second)
+        const lastSavedTime = parseFloat(localStorage.getItem('nextune_last_played_progress') || '0')
+        if (Math.abs(currentTime - lastSavedTime) >= 1) {
+          localStorage.setItem('nextune_last_played_progress', currentTime.toString())
+        }
       }
     } catch (e) {
       console.error("Progress timer error:", e)
@@ -305,60 +317,113 @@ function stopYtProgressTimer() {
   }
 }
 
-async function fetchRecommendedSong(currentSong, currentQueue) {
+// Mengambil beberapa lagu rekomendasi sekaligus untuk autoplay berkelanjutan
+async function fetchRecommendedSongs(currentSong, currentQueue, count = 5) {
+  const results = []
+
   try {
-    const queueIds = currentQueue.map(s => s.id).filter(Boolean)
-    
-    // 1. Coba cari lagu dari genre yang sama
+    // Kumpulkan semua ID yang sudah ada di antrean (hanya UUID 36-char untuk Supabase)
+    const validUuidIds = currentQueue
+      .map(s => s.id)
+      .filter(id => id && id.length === 36)
+
+    // === PRIORITAS 1: Cari lagu dari genre yang sama di Supabase ===
     if (currentSong && currentSong.genre) {
-      let query = supabase
+      let genreQuery = supabase
         .from('songs')
         .select('*')
         .eq('status', 'public')
         .eq('genre', currentSong.genre)
-      
-      if (queueIds.length > 0) {
-        query = query.not('id', 'in', `(${queueIds.join(',')})`)
-      }
-      
-      const { data } = await query.limit(5)
-      if (data && data.length > 0) {
-        return data[Math.floor(Math.random() * data.length)]
-      }
-    }
-    
-    // 2. Fallback: Cari lagu acak yang belum ada di antrean
-    let query = supabase
-      .from('songs')
-      .select('*')
-      .eq('status', 'public')
-      
-    if (queueIds.length > 0) {
-      const validUuidIds = queueIds.filter(id => id.length === 36)
+
       if (validUuidIds.length > 0) {
-        query = query.not('id', 'in', `(${validUuidIds.join(',')})`)
+        genreQuery = genreQuery.not('id', 'in', `(${validUuidIds.join(',')})`)
       }
-    }
-    
-    const { data } = await query.limit(10)
-    if (data && data.length > 0) {
-      return data[Math.floor(Math.random() * data.length)]
+
+      const { data: genreData } = await genreQuery.limit(count * 2)
+      if (genreData && genreData.length > 0) {
+        // Acak urutan
+        const shuffled = [...genreData].sort(() => Math.random() - 0.5)
+        results.push(...shuffled.slice(0, count))
+      }
     }
 
-    // 3. Last fallback: ambil lagu acak apa saja
-    const { data: fallbackData } = await supabase
-      .from('songs')
-      .select('*')
-      .eq('status', 'public')
-      .limit(5)
-      
-    if (fallbackData && fallbackData.length > 0) {
-      return fallbackData[Math.floor(Math.random() * fallbackData.length)]
+    // === PRIORITAS 2: Tambah lagu acak dari Supabase jika masih kurang ===
+    if (results.length < count) {
+      const excludeIds = [
+        ...validUuidIds,
+        ...results.map(s => s.id).filter(id => id && id.length === 36)
+      ]
+
+      let randomQuery = supabase
+        .from('songs')
+        .select('*')
+        .eq('status', 'public')
+
+      if (excludeIds.length > 0) {
+        randomQuery = randomQuery.not('id', 'in', `(${excludeIds.join(',')})`)
+      }
+
+      const { data: randomData } = await randomQuery.limit((count - results.length) * 2)
+      if (randomData && randomData.length > 0) {
+        const shuffled = [...randomData].sort(() => Math.random() - 0.5)
+        results.push(...shuffled.slice(0, count - results.length))
+      }
     }
+
+    // === PRIORITAS 3: Jika Supabase kosong total, ambil semua lagu tanpa filter ===
+    if (results.length === 0) {
+      const { data: allData } = await supabase
+        .from('songs')
+        .select('*')
+        .eq('status', 'public')
+        .limit(count * 2)
+
+      if (allData && allData.length > 0) {
+        const shuffled = [...allData].sort(() => Math.random() - 0.5)
+        results.push(...shuffled.slice(0, count))
+      }
+    }
+
+    // === PRIORITAS 4: Fallback ke YouTube Search via music service ===
+    if (results.length === 0) {
+      const searchQuery = currentSong
+        ? `${currentSong.artist || ''} ${currentSong.genre || 'music'}`.trim()
+        : 'popular music'
+
+      try {
+        const res = await fetch(
+          `${MUSIC_SERVICE_URL}/search?q=${encodeURIComponent(searchQuery)}&limit=${count}`
+        )
+        if (res.ok) {
+          const ytResults = await res.json()
+          const ytSongs = (ytResults.results || ytResults || []).slice(0, count).map(s => ({
+            id: s.videoId || s.video_id || s.id,
+            title: s.title,
+            artist: s.artist || s.channel || 'YouTube Music',
+            cover_url: s.coverUrl || s.thumbnail || s.cover_url,
+            coverUrl: s.coverUrl || s.thumbnail || s.cover_url,
+            video_id: s.videoId || s.video_id || s.id,
+            videoId: s.videoId || s.video_id || s.id,
+            is_youtube: true
+          }))
+          results.push(...ytSongs.filter(s => s.id))
+        }
+      } catch (ytErr) {
+        console.warn('YouTube search fallback failed:', ytErr)
+      }
+    }
+
   } catch (err) {
-    console.error("Failed to fetch recommendation:", err)
+    console.error("Failed to fetch recommendations:", err)
   }
-  return null
+
+  return results
+}
+
+// Kompatibel ke belakang - mengembalikan satu lagu saja (digunakan di tempat lain)
+async function fetchRecommendedSong(currentSong, currentQueue) {
+  const songs = await fetchRecommendedSongs(currentSong, currentQueue, 5)
+  return songs.length > 0 ? songs[0] : null
 }
 
 function parseLyricsContent(content, duration) {
@@ -446,7 +511,7 @@ export const usePlayerStore = create((set, get) => {
       initYouTubePlayer()
     },
 
-    playSong: async (song, newQueue = null) => {
+    playSong: async (song, newQueue = null, seekTime = null) => {
       const { isPlaying, activePlayer } = get()
       
       // Stop currently playing
@@ -461,7 +526,12 @@ export const usePlayerStore = create((set, get) => {
       }
       stopYtProgressTimer()
 
-      set({ currentSong: song, progress: 0, duration: 0, loadingStream: true, isPlaying: false })
+      const initialProgress = seekTime || 0
+      set({ currentSong: song, progress: initialProgress, duration: 0, loadingStream: true, isPlaying: false })
+
+      // Save song metadata to localStorage for resume playback feature
+      localStorage.setItem('nextune_last_played_song', JSON.stringify(song))
+      localStorage.setItem('nextune_last_played_progress', initialProgress.toString())
 
       let audioUrl = song.audioUrl || song.audio_url
       
@@ -516,9 +586,12 @@ export const usePlayerStore = create((set, get) => {
               
               // Load and play video in YouTube player
               if (typeof ytPlayer.loadVideoById === 'function') {
-                ytPlayer.loadVideoById(videoId)
+                ytPlayer.loadVideoById({
+                  videoId: videoId,
+                  startSeconds: seekTime || 0
+                })
               } else {
-                ytPlayer.cueVideoById({ videoId })
+                ytPlayer.cueVideoById({ videoId, startSeconds: seekTime || 0 })
                 ytPlayer.playVideo()
               }
               
@@ -529,6 +602,7 @@ export const usePlayerStore = create((set, get) => {
               }
               
               set({ activePlayer: 'youtube', currentYoutubeVideoId: videoId, loadingStream: false, isPlaying: true })
+              get().saveToPlayHistory(song)
               get().loadLyrics(song)
               return
             } catch (ytErr) {
@@ -564,12 +638,75 @@ export const usePlayerStore = create((set, get) => {
         updateAudioEffects(get().audioQuality, get().soundMode)
         
         await globalAudio.play()
+        
+        if (seekTime) {
+          globalAudio.currentTime = seekTime
+        }
+        
         set({ isPlaying: true, loadingStream: false })
         
+        get().saveToPlayHistory(song)
         get().loadLyrics(song)
       } catch (error) {
         console.error("Audio play error:", error)
         set({ isPlaying: false, loadingStream: false })
+      }
+    },
+
+    saveToPlayHistory: async (song) => {
+      const user = useAuthStore.getState().user
+      if (!user) return
+
+      try {
+        let songId = song.id
+        const isYoutube = !!(
+          song.is_youtube || 
+          (song.videoId && song.videoId.length === 11) || 
+          (song.video_id && song.video_id.length === 11) || 
+          (song.id && song.id.length === 11)
+        )
+
+        if (isYoutube) {
+          const videoId = song.video_id || song.videoId || song.id
+          
+          // Check if song exists in DB
+          const { data: existingSong } = await supabase
+            .from('songs')
+            .select('id')
+            .eq('video_id', videoId)
+            .maybeSingle()
+
+          if (existingSong) {
+            songId = existingSong.id
+          } else {
+            // Insert YouTube song metadata to songs table first
+            const { data: newSong } = await supabase
+              .from('songs')
+              .insert({
+                title: song.title,
+                artist: song.artist,
+                cover_url: song.coverUrl || song.cover_url,
+                video_id: videoId,
+                is_youtube: true,
+                status: 'public'
+              })
+              .select()
+              .single()
+            songId = newSong.id
+          }
+        }
+
+        // Insert into play_history
+        if (songId && songId.length === 36) {
+          await supabase
+            .from('play_history')
+            .insert({
+              user_id: user.id,
+              song_id: songId
+            })
+        }
+      } catch (err) {
+        console.warn("Gagal mencatat riwayat pemutaran ke database:", err)
       }
     },
 
@@ -595,37 +732,53 @@ export const usePlayerStore = create((set, get) => {
     },
 
     next: async () => {
-      const { queue, currentIndex, repeatMode, activePlayer, currentSong } = get()
+      const { queue, currentIndex, repeatMode, activePlayer, currentSong, shuffle } = get()
       if (queue.length === 0) return
 
       let nextIndex = currentIndex + 1
       if (nextIndex >= queue.length) {
         if (repeatMode === 'all') {
+          // Ulangi dari awal antrean
           nextIndex = 0
           set({ currentIndex: nextIndex })
           get().playSong(queue[nextIndex])
         } else {
-          // Antrean habis: Fitur Autoplay rekomendasi berkelanjutan
+          // === ANTREAN HABIS: Muat batch lagu rekomendasi baru ===
           set({ loadingStream: true })
-          const recommended = await fetchRecommendedSong(currentSong, queue)
-          if (recommended) {
-            useToastStore.getState().showToast(`Autoplay: Memutar rekomendasi "${recommended.title}"`, "info")
-            const newQueue = [...queue, recommended]
+
+          const recommended = await fetchRecommendedSongs(currentSong, queue, 5)
+
+          if (recommended && recommended.length > 0) {
+            // Acak urutan batch jika shuffle aktif
+            const orderedBatch = shuffle
+              ? [...recommended].sort(() => Math.random() - 0.5)
+              : recommended
+
+            const newQueue = [...queue, ...orderedBatch]
+            const newOriginalQueue = [...get().originalQueue, ...orderedBatch]
+
             set({
               queue: newQueue,
-              originalQueue: [...get().originalQueue, recommended],
+              originalQueue: newOriginalQueue,
               currentIndex: nextIndex,
               loadingStream: false
             })
-            get().playSong(recommended)
+
+            const firstSong = orderedBatch[0]
+            useToastStore.getState().showToast(
+              `🎵 Autoplay: Menambahkan ${orderedBatch.length} lagu rekomendasi`,
+              'info'
+            )
+            get().playSong(firstSong)
           } else {
-            // Jika tidak ada lagu rekomendasi, berhenti memutar
+            // Jika benar-benar tidak ada lagu yang bisa diputar, berhenti
             if (activePlayer === 'audio') {
               globalAudio.pause()
             } else if (activePlayer === 'youtube' && ytPlayer && typeof ytPlayer.pauseVideo === 'function') {
               ytPlayer.pauseVideo()
             }
             set({ isPlaying: false, progress: 0, loadingStream: false })
+            useToastStore.getState().showToast('Tidak ada lagu lain yang tersedia untuk diputar.', 'info')
           }
         }
       } else {

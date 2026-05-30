@@ -400,6 +400,7 @@ async function fetchRecommendedSongs(currentSong, currentQueue, count = 5) {
 
   try {
     // Kumpulkan semua UUID (36-char) dan video ID (11-char) yang sudah ada di antrean
+    // Gunakan Set untuk pencarian O(1)
     const queueUuids = currentQueue
       .map(s => s.id)
       .filter(id => id && id.length === 36)
@@ -407,6 +408,9 @@ async function fetchRecommendedSongs(currentSong, currentQueue, count = 5) {
     const queueVideoIds = currentQueue
       .map(s => s.video_id || s.videoId || (s.id && s.id.length === 11 ? s.id : null))
       .filter(Boolean)
+
+    const queueUuidSet = new Set(queueUuids)
+    const queueVideoIdSet = new Set(queueVideoIds)
 
     // === PRIORITAS 1: Cari lagu dari genre yang SAMA di Supabase ===
     if (targetGenre) {
@@ -432,7 +436,7 @@ async function fetchRecommendedSongs(currentSong, currentQueue, count = 5) {
 
     // === PRIORITAS 2: Tambah lagu acak dari Supabase jika masih kurang ===
     if (results.length < count) {
-      const excludeIds = [
+      const excludeUuids = [
         ...queueUuids,
         ...results.map(s => s.id).filter(id => id && id.length === 36)
       ]
@@ -446,8 +450,8 @@ async function fetchRecommendedSongs(currentSong, currentQueue, count = 5) {
         .select('*')
         .eq('status', 'public')
 
-      if (excludeIds.length > 0) {
-        randomQuery = randomQuery.not('id', 'in', `(${excludeIds.join(',')})`)
+      if (excludeUuids.length > 0) {
+        randomQuery = randomQuery.not('id', 'in', `(${excludeUuids.join(',')})`)
       }
       if (excludeVideoIds.length > 0) {
         randomQuery = randomQuery.not('video_id', 'in', `(${excludeVideoIds.join(',')})`)
@@ -462,7 +466,6 @@ async function fetchRecommendedSongs(currentSong, currentQueue, count = 5) {
 
     // === PRIORITAS 3: Jika Supabase kosong total, ambil semua lagu tanpa filter ===
     if (results.length === 0) {
-      const excludeVideoIds = queueVideoIds
       let allQuery = supabase
         .from('songs')
         .select('*')
@@ -471,8 +474,8 @@ async function fetchRecommendedSongs(currentSong, currentQueue, count = 5) {
       if (queueUuids.length > 0) {
         allQuery = allQuery.not('id', 'in', `(${queueUuids.join(',')})`)
       }
-      if (excludeVideoIds.length > 0) {
-        allQuery = allQuery.not('video_id', 'in', `(${excludeVideoIds.join(',')})`)
+      if (queueVideoIds.length > 0) {
+        allQuery = allQuery.not('video_id', 'in', `(${queueVideoIds.join(',')})`)
       }
 
       const { data: allData } = await allQuery.limit(count * 2)
@@ -484,13 +487,19 @@ async function fetchRecommendedSongs(currentSong, currentQueue, count = 5) {
     }
 
     // === PRIORITAS 4: YouTube Search — gunakan genre sebagai query agar relevan ===
-    if (results.length === 0) {
+    if (results.length < count) {
       // Prioritas: genre → artis+genre → musik populer
       const genreQuery = targetGenre || (currentSong?.genre) || null
       const artistQuery = currentSong?.artist || ''
       const searchQuery = genreQuery
         ? (artistQuery ? `${artistQuery} ${genreQuery}` : `${genreQuery} music`)
         : (artistQuery ? `${artistQuery} similar` : 'popular music')
+
+      // Build combined exclusion Set (queue + already fetched DB results) for O(1) deduplication
+      const alreadyFetchedVideoIds = results
+        .map(s => s.video_id || s.videoId || (s.id && s.id.length === 11 ? s.id : null))
+        .filter(Boolean)
+      const excludedVideoIdSet = new Set([...queueVideoIdSet, ...alreadyFetchedVideoIds])
 
       try {
         const res = await fetch(
@@ -514,9 +523,9 @@ async function fetchRecommendedSongs(currentSong, currentQueue, count = 5) {
                 is_youtube: true
               }
             })
-            // FILTER OUT ALREADY PLAYED / IN-QUEUE SONGS
-            .filter(s => !queueVideoIds.includes(s.videoId))
-            .slice(0, count)
+            // FILTER: keluarkan lagu yang sudah ada di antrean MAUPUN yang sudah di-fetch sebelumnya
+            .filter(s => !excludedVideoIdSet.has(s.videoId))
+            .slice(0, count - results.length)
           results.push(...ytSongs)
         }
       } catch (ytErr) {
@@ -530,7 +539,6 @@ async function fetchRecommendedSongs(currentSong, currentQueue, count = 5) {
 
   return results
 }
-
 
 function parseLyricsContent(content, duration) {
   if (!content) return []

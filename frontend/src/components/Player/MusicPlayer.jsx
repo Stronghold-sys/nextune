@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, Volume2, VolumeX, ListMusic, Clock, Gauge, ChevronDown, Heart, Plus, ListCollapse, Sliders } from 'lucide-react'
 import { usePlayerStore } from '../../store/usePlayerStore'
@@ -47,18 +47,19 @@ export default function MusicPlayer() {
 
   const activeLyricRef = useRef(null)
 
-  const [currentLyricIdx, setCurrentLyricIdx] = useState(-1)
-
-  // Determine active lyric index
-  useEffect(() => {
-    if (!lyrics || lyrics.length === 0) return
-    const idx = lyrics.findIndex((line, idx) => {
-      return progress >= line.time && (idx === lyrics.length - 1 || progress < lyrics[idx + 1].time)
-    })
-    if (idx !== -1 && idx !== currentLyricIdx) {
-      setCurrentLyricIdx(idx)
+  // Compute active lyric index directly from progress (no setState in effect)
+  const currentLyricIdx = useMemo(() => {
+    if (!lyrics || lyrics.length === 0) return -1
+    let found = -1
+    for (let i = 0; i < lyrics.length; i++) {
+      if (progress >= lyrics[i].time) {
+        found = i
+      } else {
+        break
+      }
     }
-  }, [progress, lyrics, currentLyricIdx])
+    return found
+  }, [progress, lyrics])
 
   // Sync scroll ONLY when the active line changes
   useEffect(() => {

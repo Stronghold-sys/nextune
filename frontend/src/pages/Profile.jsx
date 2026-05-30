@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { User, Key, BarChart2, LogOut, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react'
+import { User, Key, BarChart2, LogOut, CheckCircle2, AlertCircle, RefreshCw, Crown } from 'lucide-react'
 import { useAuthStore } from '../store/useAuthStore'
 
 export default function Profile() {
@@ -97,6 +97,59 @@ export default function Profile() {
           Keluar Akun
         </button>
       </div>
+
+      {/* STATUS LANGGANAN CARD */}
+      {(() => {
+        const isPremium = profile && (
+          ['admin', 'super_admin', 'content_admin', 'moderation_admin', 'finance_admin'].includes(profile.role) ||
+          (profile.premium_until && new Date(profile.premium_until) > new Date())
+        )
+        return (
+          <div className="bg-background-card border border-gray-border/50 rounded-2xl p-5 sm:p-6 space-y-4 text-left">
+            <h3 className="text-base font-bold text-white flex items-center gap-2">
+              <Crown className="w-5 h-5 text-primary-light" />
+              Status Langganan
+            </h3>
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-background border border-gray-border/30 p-4 rounded-xl">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-gray-text uppercase tracking-wider">Status:</span>
+                  <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border uppercase ${
+                    isPremium 
+                      ? 'bg-primary/10 border-primary/20 text-primary-light' 
+                      : 'bg-accent/10 border-accent/20 text-accent'
+                  }`}>
+                    {isPremium ? 'PREMIUM 💎' : 'FREE 🎵'}
+                  </span>
+                </div>
+                {isPremium ? (
+                  <p className="text-[11px] text-gray-text mt-2 leading-relaxed">
+                    Akses premium aktif hingga:{' '}
+                    <span className="font-bold text-white">
+                      {profile.premium_until 
+                        ? new Date(profile.premium_until).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) 
+                        : 'Selamanya (Administrator)'
+                      }
+                    </span>
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-gray-text mt-2 leading-relaxed">
+                    Anda menggunakan akun Free. Pemutaran lagu dibatasi hingga 30 detik dan fitur kustomisasi kecepatan putar serta sleep timer terkunci.
+                  </p>
+                )}
+              </div>
+              {!isPremium && (
+                <button
+                  onClick={() => window.dispatchEvent(new CustomEvent('open-premium-modal'))}
+                  className="bg-primary hover:bg-primary-hover text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all shadow-md shadow-primary/10 shrink-0"
+                >
+                  Beli Premium Sekarang
+                </button>
+              )}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* 2-Column Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

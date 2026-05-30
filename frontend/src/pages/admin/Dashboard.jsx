@@ -111,11 +111,28 @@ export default function Dashboard() {
         }
 
         // 8. Fetch Premium Transactions
-        const { data: tx } = await supabase.from('transactions').select('*').order('created_at', { ascending: false })
+        const { data: tx } = await supabase
+          .from('transactions')
+          .select(`
+            id,
+            amount,
+            status,
+            payment_method,
+            created_at,
+            profiles (
+              username,
+              full_name,
+              email
+            ),
+            premium_packages (
+              name
+            )
+          `)
+          .order('created_at', { ascending: false })
         if (isCurrent) {
           setTransactionList(tx || [
-            { id: "tx-1", user_email: "rahmatakbar2088@gmail.com", package: "Bulanan Premium", amount: 49000, status: "completed", date: "30 May 2026" },
-            { id: "tx-2", user_email: "budi@gmail.com", package: "Tahunan Premium", amount: 299000, status: "completed", date: "29 May 2026" }
+            { id: "tx-1", profiles: { email: "rahmatakbar2088@gmail.com" }, premium_packages: { name: "Bulanan Premium" }, amount: 49000, status: "completed", date: "30 May 2026" },
+            { id: "tx-2", profiles: { email: "budi@gmail.com" }, premium_packages: { name: "Tahunan Premium" }, amount: 299000, status: "completed", date: "29 May 2026" }
           ])
         }
       } catch (e) {
@@ -167,6 +184,35 @@ export default function Dashboard() {
     if (confirm("Apakah Anda yakin ingin menghapus sementara pengguna ini?")) {
       setUserList(userList.filter(u => u.id !== userId))
       alert("Pengguna berhasil dihapus secara lunak (soft-delete).")
+    }
+  }
+
+  const handleTogglePremium = async (userId, currentPremiumUntil) => {
+    try {
+      const isPremium = currentPremiumUntil && new Date(currentPremiumUntil) > new Date()
+      let nextPremiumUntil = null
+
+      if (!isPremium) {
+        const d = new Date()
+        d.setDate(d.getDate() + 30)
+        nextPremiumUntil = d.toISOString()
+      }
+
+      const { error } = await supabase
+        .from('profiles')
+        .update({ premium_until: nextPremiumUntil })
+        .eq('id', userId)
+
+      if (error) throw error
+
+      // Reload user list
+      const { data: users } = await supabase.from('profiles').select('*')
+      setUserList(users || [])
+
+      alert(isPremium ? "Status premium pengguna berhasil dinonaktifkan." : "Status premium pengguna berhasil diaktifkan selama 30 hari.")
+    } catch (err) {
+      console.error("Gagal mengubah status premium:", err)
+      alert("Gagal mengubah status premium: " + err.message)
     }
   }
 
@@ -556,50 +602,79 @@ export default function Dashboard() {
                     <tr className="bg-background-sidebar border-b border-gray-border text-gray-text font-bold">
                       <th className="p-4">Foto</th>
                       <th className="p-4">Nama</th>
-                      <th className="p-4">Email/ID</th>
+                      <th className="p-4">Email</th>
                       <th className="p-4">Role</th>
+                      <th className="p-4">Status Premium</th>
                       <th className="p-4 text-center">Aksi</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-border/40">
-                    {userList.filter(u => (u.full_name || u.username || "").toLowerCase().includes(userSearch.toLowerCase())).map((usr, idx) => (
-                      <tr key={usr.id || idx} className="hover:bg-background-hover transition-colors">
-                        <td className="p-4">
-                          <img src={usr.avatar_url || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&q=80"} className="w-8 h-8 rounded-full object-cover" />
-                        </td>
-                        <td className="p-4 font-semibold text-white">{usr.full_name || usr.username}</td>
-                        <td className="p-4 text-gray-text">{usr.id.slice(0, 8)}...</td>
-                        <td className="p-4">
-                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border ${
-                            usr.role === 'admin' || usr.role === 'super_admin'
-                              ? 'bg-accent/15 border-accent text-accent'
-                              : 'bg-primary/10 border-primary text-primary-light'
-                          }`}>
-                            {usr.role || 'user'}
-                          </span>
-                        </td>
-                        <td className="p-4 text-center space-x-1">
-                          <button
-                            onClick={() => handleToggleBlockUser(usr.id, usr.role)}
-                            className="bg-background border border-gray-border px-2.5 py-1.5 rounded-lg text-[10px] font-bold text-white hover:border-gray-text"
-                          >
-                            Blokir
-                          </button>
-                          <button
-                            onClick={() => handleResetPassword(usr.username + "@gmail.com")}
-                            className="bg-background border border-gray-border px-2.5 py-1.5 rounded-lg text-[10px] font-bold text-white hover:border-gray-text"
-                          >
-                            Reset Pwd
-                          </button>
-                          <button
-                            onClick={() => handleSoftDeleteUser(usr.id)}
-                            className="text-accent hover:bg-accent/10 p-1.5 rounded-lg"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                    {userList.filter(u => (u.full_name || u.username || u.email || "").toLowerCase().includes(userSearch.toLowerCase())).map((usr, idx) => {
+                      const isUserPrem = usr.role === 'admin' || usr.role === 'super_admin' || (usr.premium_until && new Date(usr.premium_until) > new Date())
+                      return (
+                        <tr key={usr.id || idx} className="hover:bg-background-hover transition-colors">
+                          <td className="p-4">
+                            <img src={usr.avatar_url || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&q=80"} className="w-8 h-8 rounded-full object-cover" />
+                          </td>
+                          <td className="p-4 font-semibold text-white">{usr.full_name || usr.username}</td>
+                          <td className="p-4">
+                            <p className="font-semibold text-white">{usr.email || 'Tidak Diketahui'}</p>
+                            <p className="text-[9px] text-gray-text mt-0.5">{usr.id.slice(0, 8)}...</p>
+                          </td>
+                          <td className="p-4">
+                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border ${
+                              usr.role === 'admin' || usr.role === 'super_admin'
+                                ? 'bg-accent/15 border-accent text-accent'
+                                : 'bg-primary/10 border-primary text-primary-light'
+                            }`}>
+                              {usr.role || 'user'}
+                            </span>
+                          </td>
+                          <td className="p-4">
+                            <div className="space-y-1">
+                              <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border uppercase ${
+                                isUserPrem 
+                                  ? 'bg-primary/10 border-primary/20 text-primary-light' 
+                                  : 'bg-background border-gray-border text-gray-text'
+                              }`}>
+                                {isUserPrem ? 'Premium 💎' : 'Free 🎵'}
+                              </span>
+                              {usr.premium_until && (
+                                <p className="text-[9px] text-gray-text">
+                                  Hingga: {new Date(usr.premium_until).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                </p>
+                              )}
+                            </div>
+                          </td>
+                          <td className="p-4 text-center space-x-1 whitespace-nowrap">
+                            <button
+                              onClick={() => handleTogglePremium(usr.id, usr.premium_until)}
+                              className="bg-primary/20 hover:bg-primary/30 border border-primary/20 px-2.5 py-1.5 rounded-lg text-[10px] font-bold text-primary-light transition-all"
+                            >
+                              {isUserPrem ? 'Set Free' : 'Set Premium'}
+                            </button>
+                            <button
+                              onClick={() => handleToggleBlockUser(usr.id, usr.role)}
+                              className="bg-background border border-gray-border px-2.5 py-1.5 rounded-lg text-[10px] font-bold text-white hover:border-gray-text"
+                            >
+                              Blokir
+                            </button>
+                            <button
+                              onClick={() => handleResetPassword(usr.email || usr.username + "@gmail.com")}
+                              className="bg-background border border-gray-border px-2.5 py-1.5 rounded-lg text-[10px] font-bold text-white hover:border-gray-text"
+                            >
+                              Reset Pwd
+                            </button>
+                            <button
+                              onClick={() => handleSoftDeleteUser(usr.id)}
+                              className="text-accent hover:bg-accent/10 p-1.5 rounded-lg inline-block align-middle"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1033,18 +1108,22 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-border/40">
-                  {transactionList.map((tx, idx) => (
-                    <tr key={tx.id || idx} className="hover:bg-background-hover transition-colors">
-                      <td className="p-4 font-semibold text-white">{tx.user_email || 'user@example.com'}</td>
-                      <td className="p-4 text-gray-text">{tx.package || 'Bulanan Premium'}</td>
-                      <td className="p-4 font-bold text-white">Rp {tx.amount.toLocaleString('id-ID')}</td>
-                      <td className="p-4">
-                        <span className="bg-primary/10 border border-primary/20 text-primary-light text-[9px] px-2 py-0.5 rounded-full font-bold uppercase">
-                          {tx.status || 'COMPLETED'}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                  {transactionList.map((tx, idx) => {
+                    const userEmail = tx.profiles?.email || tx.profiles?.username || tx.user_email || 'user@example.com'
+                    const packageName = tx.premium_packages?.name || tx.package || (tx.amount === 299000 ? 'Tahunan Premium' : 'Bulanan Premium')
+                    return (
+                      <tr key={tx.id || idx} className="hover:bg-background-hover transition-colors">
+                        <td className="p-4 font-semibold text-white">{userEmail}</td>
+                        <td className="p-4 text-gray-text">{packageName}</td>
+                        <td className="p-4 font-bold text-white">Rp {tx.amount.toLocaleString('id-ID')}</td>
+                        <td className="p-4">
+                          <span className="bg-primary/10 border border-primary/20 text-primary-light text-[9px] px-2 py-0.5 rounded-full font-bold uppercase">
+                            {tx.status || 'COMPLETED'}
+                          </span>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>

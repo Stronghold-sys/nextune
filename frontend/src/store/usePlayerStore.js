@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { useAuthStore } from './useAuthStore'
 
 const MUSIC_SERVICE_URL = import.meta.env.VITE_MUSIC_SERVICE_URL || 'http://localhost:8001'
 
@@ -6,9 +7,22 @@ const MUSIC_SERVICE_URL = import.meta.env.VITE_MUSIC_SERVICE_URL || 'http://loca
 let globalAudio = new Audio()
 
 export const usePlayerStore = create((set, get) => {
-  // Update state with audio element progress
+  // Update state with audio element progress and enforce 30s limit for non-premium
   globalAudio.addEventListener('timeupdate', () => {
-    set({ progress: globalAudio.currentTime })
+    const profile = useAuthStore.getState().profile
+    const isPremium = profile && (
+      ['admin', 'super_admin', 'content_admin', 'moderation_admin', 'finance_admin'].includes(profile.role) ||
+      (profile.premium_until && new Date(profile.premium_until) > new Date())
+    )
+
+    if (!isPremium && globalAudio.currentTime >= 30) {
+      globalAudio.pause()
+      globalAudio.currentTime = 0
+      set({ isPlaying: false, progress: 0 })
+      window.dispatchEvent(new CustomEvent('premium-required', { detail: { reason: '30s_limit' } }))
+    } else {
+      set({ progress: globalAudio.currentTime })
+    }
   })
 
   globalAudio.addEventListener('durationchange', () => {
@@ -164,6 +178,17 @@ export const usePlayerStore = create((set, get) => {
     },
 
     seek: (time) => {
+      const profile = useAuthStore.getState().profile
+      const isPremium = profile && (
+        ['admin', 'super_admin', 'content_admin', 'moderation_admin', 'finance_admin'].includes(profile.role) ||
+        (profile.premium_until && new Date(profile.premium_until) > new Date())
+      )
+      if (!isPremium && time >= 30) {
+        globalAudio.currentTime = 29.9
+        set({ progress: 29.9 })
+        window.dispatchEvent(new CustomEvent('premium-required', { detail: { reason: '30s_limit' } }))
+        return
+      }
       globalAudio.currentTime = time
       set({ progress: time })
     },
@@ -175,6 +200,17 @@ export const usePlayerStore = create((set, get) => {
     },
 
     setPlaybackSpeed: (speed) => {
+      if (speed !== 1) {
+        const profile = useAuthStore.getState().profile
+        const isPremium = profile && (
+          ['admin', 'super_admin', 'content_admin', 'moderation_admin', 'finance_admin'].includes(profile.role) ||
+          (profile.premium_until && new Date(profile.premium_until) > new Date())
+        )
+        if (!isPremium) {
+          window.dispatchEvent(new CustomEvent('premium-required', { detail: { reason: 'playback_speed' } }))
+          return
+        }
+      }
       globalAudio.playbackRate = speed
       set({ playbackSpeed: speed })
     },
@@ -242,13 +278,23 @@ export const usePlayerStore = create((set, get) => {
     },
 
     setSleepTimer: (minutes) => {
-      if (sleepInterval) clearInterval(sleepInterval)
-      
       if (minutes === null) {
+        if (sleepInterval) clearInterval(sleepInterval)
         set({ sleepTimer: null })
         return
       }
 
+      const profile = useAuthStore.getState().profile
+      const isPremium = profile && (
+        ['admin', 'super_admin', 'content_admin', 'moderation_admin', 'finance_admin'].includes(profile.role) ||
+        (profile.premium_until && new Date(profile.premium_until) > new Date())
+      )
+      if (!isPremium) {
+        window.dispatchEvent(new CustomEvent('premium-required', { detail: { reason: 'sleep_timer' } }))
+        return
+      }
+
+      if (sleepInterval) clearInterval(sleepInterval)
       set({ sleepTimer: minutes })
       
       sleepInterval = setInterval(() => {

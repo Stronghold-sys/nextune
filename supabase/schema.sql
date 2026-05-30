@@ -22,6 +22,8 @@ CREATE TABLE public.profiles (
     username TEXT,
     full_name TEXT,
     avatar_url TEXT,
+    email TEXT,
+    premium_until TIMESTAMP WITH TIME ZONE DEFAULT NULL,
     role TEXT DEFAULT 'user' CHECK (role IN ('user', 'admin', 'super_admin', 'content_admin', 'moderation_admin', 'finance_admin')),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW())
 );
@@ -30,10 +32,10 @@ CREATE TABLE public.profiles (
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Profil dapat dibaca oleh siapa saja" ON public.profiles
-    FOR SELECT USING (true);
+     FOR SELECT USING (true);
 
 CREATE POLICY "Pengguna dapat mengubah profil sendiri" ON public.profiles
-    FOR UPDATE USING (auth.uid() = id);
+     FOR UPDATE USING (auth.uid() = id);
 
 -- Trigger untuk membuat profil secara otomatis HANYA SETELAH user memverifikasi OTP (email_confirmed_at tidak null)
 CREATE OR REPLACE FUNCTION public.handle_new_user()
@@ -41,7 +43,7 @@ RETURNS TRIGGER AS $$
 BEGIN
     -- Hanya buat profil jika email sudah dikonfirmasi dan profil belum ada
     IF NEW.email_confirmed_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = NEW.id) THEN
-        INSERT INTO public.profiles (id, username, full_name, avatar_url, role)
+        INSERT INTO public.profiles (id, username, full_name, avatar_url, role, email)
         VALUES (
             NEW.id,
             split_part(NEW.email, '@', 1),
@@ -50,7 +52,8 @@ BEGIN
             CASE 
                 WHEN NEW.email = 'admin@gmail.com' THEN 'admin'
                 ELSE 'user'
-            END
+            END,
+            NEW.email
         );
     END IF;
     RETURN NEW;

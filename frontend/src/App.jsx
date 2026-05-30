@@ -16,6 +16,7 @@ import Dashboard from './pages/admin/Dashboard'
 // Components
 import MusicPlayer from './components/Player/MusicPlayer'
 import AuthModal from './components/Auth/AuthModal'
+import PremiumModal from './components/Premium/PremiumModal'
 
 export default function App() {
   const { user, profile, checkUser } = useAuthStore()
@@ -25,6 +26,26 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState("home") // 'home' | 'search' | 'library' | 'profile' | 'admin'
   const [authModalState, setAuthModalState] = useState({ isOpen: false, defaultMode: 'login' })
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [isPremiumModalOpen, setIsPremiumModalOpen] = useState(false)
+
+  const isPremium = profile && (
+    ['admin', 'super_admin', 'content_admin', 'moderation_admin', 'finance_admin'].includes(profile.role) ||
+    (profile.premium_until && new Date(profile.premium_until) > new Date())
+  )
+
+  useEffect(() => {
+    const handlePremiumRequired = () => {
+      setIsPremiumModalOpen(true)
+    }
+
+    window.addEventListener('premium-required', handlePremiumRequired)
+    window.addEventListener('open-premium-modal', handlePremiumRequired)
+
+    return () => {
+      window.removeEventListener('premium-required', handlePremiumRequired)
+      window.removeEventListener('open-premium-modal', handlePremiumRequired)
+    }
+  }, [])
 
   // Notification States
   const [notifications, setNotifications] = useState([])
@@ -238,6 +259,19 @@ export default function App() {
                 )
               })}
             </nav>
+
+            {!isPremium && user && (
+              <div className="mt-4 p-3 bg-gradient-to-br from-primary/20 via-primary/5 to-accent/15 border border-primary/20 rounded-2xl space-y-2 text-left relative overflow-hidden">
+                <div className="text-[10px] font-black text-primary-light uppercase tracking-wider">NexTune Premium</div>
+                <div className="text-[9.5px] text-gray-text leading-relaxed">Buka kualitas FLAC & dengar lagu penuh tanpa batas 30 detik.</div>
+                <button 
+                  onClick={() => setIsPremiumModalOpen(true)}
+                  className="w-full bg-primary hover:bg-primary-hover text-[10px] font-bold py-1.5 rounded-lg text-white transition-all shadow-md shadow-primary/15"
+                >
+                  Upgrade Sekarang
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Admin panel link in sidebar bottom */}
@@ -323,6 +357,12 @@ export default function App() {
         isOpen={authModalState.isOpen}
         defaultMode={authModalState.defaultMode}
         onClose={() => setAuthModalState({ isOpen: false, defaultMode: 'login' })}
+      />
+
+      {/* Premium Upgrade Modal */}
+      <PremiumModal
+        isOpen={isPremiumModalOpen}
+        onClose={() => setIsPremiumModalOpen(false)}
       />
 
       {/* 6. SETTINGS MODAL */}

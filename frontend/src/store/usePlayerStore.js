@@ -409,7 +409,6 @@ async function fetchRecommendedSongs(currentSong, currentQueue, count = 5) {
       .map(s => s.video_id || s.videoId || (s.id && s.id.length === 11 ? s.id : null))
       .filter(Boolean)
 
-    const queueUuidSet = new Set(queueUuids)
     const queueVideoIdSet = new Set(queueVideoIds)
 
     // === PRIORITAS 1: Cari lagu dari genre yang SAMA di Supabase ===

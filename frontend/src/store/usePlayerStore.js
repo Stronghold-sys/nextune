@@ -110,7 +110,7 @@ function selectAudioElement(useEffects) {
       target.volume = store.volume
       target.playbackRate = store.playbackSpeed
     }
-  } catch (e) {
+  } catch {
     // Ignore if store is not yet fully defined
   }
   
@@ -361,7 +361,7 @@ async function fetchRecommendedSong(currentSong, currentQueue) {
   return null
 }
 
-function parseLyricsContent(content, duration, song) {
+function parseLyricsContent(content, duration) {
   if (!content) return []
   
   const lines = content.split('\n').map(l => l.trim()).filter(Boolean)
@@ -806,8 +806,6 @@ export const usePlayerStore = create((set, get) => {
     },
 
     loadLyrics: async (song) => {
-      const title = song.title || "Lagu"
-      const artist = song.artist || "Artis"
       const songId = song.id
       
       if (!songId) {
@@ -826,13 +824,13 @@ export const usePlayerStore = create((set, get) => {
 
         if (data && data.content) {
           const duration = get().duration || song.duration_seconds || 180
-          const parsed = parseLyricsContent(data.content, duration, song)
+          const parsed = parseLyricsContent(data.content, duration)
           set({ lyrics: parsed, isLyricsSynced: data.is_synced || false })
         } else {
           set({ lyrics: getFallbackLyrics(song), isLyricsSynced: false })
         }
-      } catch (err) {
-        console.warn("Gagal memuat lirik dari database:", err)
+      } catch (_err) {
+        console.warn("Gagal memuat lirik dari database")
         set({ lyrics: getFallbackLyrics(song), isLyricsSynced: false })
       }
     },

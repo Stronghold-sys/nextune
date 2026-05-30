@@ -155,3 +155,36 @@ BEGIN
         ALTER PUBLICATION supabase_realtime ADD TABLE public.banners;
     END IF;
 END $$;
+
+-- 5. Add notes column to transactions and create email_logs for debugging email delivery
+ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS notes TEXT;
+
+CREATE TABLE IF NOT EXISTS public.email_logs (
+    id BIGSERIAL PRIMARY KEY,
+    recipient_email TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    status TEXT NOT NULL, -- 'success' | 'failed'
+    error_message TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW())
+);
+
+ALTER TABLE public.email_logs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Admin can view and manage all email_logs" ON public.email_logs
+    FOR ALL USING (
+        EXISTS (
+            SELECT 1 FROM public.profiles 
+            WHERE id = auth.uid() AND role IN ('admin', 'super_admin')
+        )
+    );
+
+-- Add email_logs to realtime publication
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_publication_tables 
+        WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'email_logs'
+    ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.email_logs;
+    END IF;
+END $$;

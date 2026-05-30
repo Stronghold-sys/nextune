@@ -12,6 +12,24 @@ async function sendReceiptEmail({ email, username, packageName, amount, merchant
   if (!smtpUser || !smtpPass) {
     console.warn("SMTP credentials not configured (SMTP_USER or SMTP_PASS is missing). Email receipt log:");
     console.log(`Receipt for: ${email} (${username}) - Package: ${packageName} - Amount: Rp ${amount} - Order ID: ${merchantOrderId} - Duration: ${days} days`);
+    
+    try {
+      await supabase
+        .from('email_logs')
+        .insert({
+          recipient_email: email,
+          subject: 'Pembayaran Berhasil! Selamat Datang di NexTune Premium',
+          status: 'failed',
+          error_message: 'SMTP credentials not configured (SMTP_USER or SMTP_PASS is missing on server)'
+        });
+      
+      await supabase
+        .from('transactions')
+        .update({ notes: 'Gagal kirim email: Variabel SMTP_USER atau SMTP_PASS belum dikonfigurasi di dashboard server.' })
+        .eq('id', merchantOrderId);
+    } catch (dbErr) {
+      console.warn("Gagal menyimpan log email ke database:", dbErr.message);
+    }
     return;
   }
 
@@ -97,9 +115,46 @@ async function sendReceiptEmail({ email, username, packageName, amount, merchant
   try {
     const info = await transporter.sendMail(mailOptions);
     console.log(`Receipt email sent successfully to ${email}. Message ID: ${info.messageId}`);
+    
+    try {
+      await supabase
+        .from('email_logs')
+        .insert({
+          recipient_email: email,
+          subject: mailOptions.subject,
+          status: 'success',
+          error_message: null
+        });
+      
+      await supabase
+        .from('transactions')
+        .update({ notes: `Email tanda terima sukses dikirim. Message ID: ${info.messageId}` })
+        .eq('id', merchantOrderId);
+    } catch (dbErr) {
+      console.warn("Gagal mencatat log email sukses ke database:", dbErr.message);
+    }
+    
     return info;
   } catch (mailError) {
     console.error(`Failed to send receipt email to ${email}:`, mailError);
+    
+    try {
+      await supabase
+        .from('email_logs')
+        .insert({
+          recipient_email: email,
+          subject: mailOptions.subject,
+          status: 'failed',
+          error_message: mailError.message || String(mailError)
+        });
+      
+      await supabase
+        .from('transactions')
+        .update({ notes: `Email gagal dikirim: ${mailError.message || String(mailError)}` })
+        .eq('id', merchantOrderId);
+    } catch (dbErr) {
+      console.warn("Gagal mencatat log email gagal ke database:", dbErr.message);
+    }
   }
 }
 

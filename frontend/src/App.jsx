@@ -17,6 +17,7 @@ import Dashboard from './pages/admin/Dashboard'
 import MusicPlayer from './components/Player/MusicPlayer'
 import AuthModal from './components/Auth/AuthModal'
 import PremiumModal from './components/Premium/PremiumModal'
+import ToastContainer from './components/Toast/ToastContainer'
 
 export default function App() {
   const { user, profile, checkUser } = useAuthStore()
@@ -363,6 +364,9 @@ export default function App() {
         isOpen={isPremiumModalOpen}
         onClose={() => setIsPremiumModalOpen(false)}
       />
+
+      {/* 5.5. TOAST AND CONFIRM DIALOG CONTAINER */}
+      <ToastContainer />
 
       {/* 6. SETTINGS MODAL */}
       <AnimatePresence>

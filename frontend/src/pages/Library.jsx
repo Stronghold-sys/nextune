@@ -3,6 +3,7 @@ import { Plus, Play, Disc, Heart, Clock, Trash2, Share2, Download } from 'lucide
 import { supabase } from '../supabaseClient'
 import { useAuthStore } from '../store/useAuthStore'
 import { usePlayerStore } from '../store/usePlayerStore'
+import { useToastStore } from '../store/useToastStore'
 
 export default function Library({ onOpenAuth }) {
   const { user } = useAuthStore()
@@ -143,26 +144,27 @@ export default function Library({ onOpenAuth }) {
     }
   }
 
-  const handleDeletePlaylist = async (playlistId, e) => {
+  const handleDeletePlaylist = (playlistId, e) => {
     e.stopPropagation()
-    if (!confirm("Apakah Anda yakin ingin menghapus playlist ini?")) return
+    useToastStore.getState().showConfirm("Apakah Anda yakin ingin menghapus playlist ini?", async () => {
+      if (!user) {
+        setPlaylists(playlists.filter(p => p.id !== playlistId))
+        return
+      }
 
-    if (!user) {
-      setPlaylists(playlists.filter(p => p.id !== playlistId))
-      return
-    }
+      try {
+        const { error } = await supabase
+          .from('playlists')
+          .delete()
+          .eq('id', playlistId)
 
-    try {
-      const { error } = await supabase
-        .from('playlists')
-        .delete()
-        .eq('id', playlistId)
-
-      if (error) throw error
-      setPlaylists(playlists.filter(p => p.id !== playlistId))
-    } catch (err) {
-      alert("Gagal menghapus playlist: " + err.message)
-    }
+        if (error) throw error
+        setPlaylists(playlists.filter(p => p.id !== playlistId))
+        alert("Playlist berhasil dihapus.")
+      } catch (err) {
+        alert("Gagal menghapus playlist: " + err.message)
+      }
+    })
   }
 
   const handleSharePlaylist = (playlist, e) => {

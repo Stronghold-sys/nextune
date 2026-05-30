@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { useAuthStore } from '../../store/useAuthStore'
 import { supabase } from '../../supabaseClient'
+import { useToastStore } from '../../store/useToastStore'
 
 export default function Dashboard() {
   const { user, profile, login, logout } = useAuthStore()
@@ -207,10 +208,10 @@ export default function Dashboard() {
   }
 
   const handleSoftDeleteUser = (userId) => {
-    if (confirm("Apakah Anda yakin ingin menghapus sementara pengguna ini?")) {
+    useToastStore.getState().showConfirm("Apakah Anda yakin ingin menghapus sementara pengguna ini?", () => {
       setUserList(userList.filter(u => u.id !== userId))
       alert("Pengguna berhasil dihapus secara lunak (soft-delete).")
-    }
+    })
   }
 
   const formatToWIB = (dateString) => {
@@ -307,21 +308,22 @@ export default function Dashboard() {
     }
   }
 
-  const handleDeleteVoucher = async (code) => {
-    if (!confirm(`Hapus voucher ${code}?`)) return
-    try {
-      const { error } = await supabase
-        .from('vouchers')
-        .delete()
-        .eq('code', code)
+  const handleDeleteVoucher = (code) => {
+    useToastStore.getState().showConfirm(`Hapus voucher ${code}?`, async () => {
+      try {
+        const { error } = await supabase
+          .from('vouchers')
+          .delete()
+          .eq('code', code)
 
-      if (error) throw error
+        if (error) throw error
 
-      setVouchersList(vouchersList.filter(v => v.code !== code))
-      alert(`Voucher ${code} berhasil dihapus.`)
-    } catch (err) {
-      alert("Gagal menghapus voucher: " + err.message)
-    }
+        setVouchersList(vouchersList.filter(v => v.code !== code))
+        alert(`Voucher ${code} berhasil dihapus.`)
+      } catch (err) {
+        alert("Gagal menghapus voucher: " + err.message)
+      }
+    })
   }
 
   const generateRandomCode = () => {
@@ -373,15 +375,17 @@ export default function Dashboard() {
     }
   }
 
-  const handleDeleteSong = async (id) => {
-    if (!confirm("Hapus lagu ini?")) return
-    try {
-      const { error } = await supabase.from('songs').delete().eq('id', id)
-      if (error) throw error
-      setSongList(songList.filter(s => s.id !== id))
-    } catch (err) {
-      alert(err.message)
-    }
+  const handleDeleteSong = (id) => {
+    useToastStore.getState().showConfirm("Hapus lagu ini?", async () => {
+      try {
+        const { error } = await supabase.from('songs').delete().eq('id', id)
+        if (error) throw error
+        setSongList(songList.filter(s => s.id !== id))
+        alert("Lagu berhasil dihapus.")
+      } catch (err) {
+        alert(err.message)
+      }
+    })
   }
 
   const handleToggleSongStatus = async (id, currentStatus) => {
@@ -418,15 +422,17 @@ export default function Dashboard() {
     }
   }
 
-  const handleDeleteBanner = async (id) => {
-    if (!confirm("Hapus banner ini?")) return
-    try {
-      const { error } = await supabase.from('banners').delete().eq('id', id)
-      if (error) throw error
-      setBannerList(bannerList.filter(b => b.id !== id))
-    } catch (err) {
-      alert(err.message)
-    }
+  const handleDeleteBanner = (id) => {
+    useToastStore.getState().showConfirm("Hapus banner ini?", async () => {
+      try {
+        const { error } = await supabase.from('banners').delete().eq('id', id)
+        if (error) throw error
+        setBannerList(bannerList.filter(b => b.id !== id))
+        alert("Banner berhasil dihapus.")
+      } catch (err) {
+        alert(err.message)
+      }
+    })
   }
 
   // Notification Broadcast
@@ -1167,11 +1173,12 @@ export default function Dashboard() {
                       </td>
                       <td className="p-4 text-center">
                         <button 
-                          onClick={async () => {
-                            if(confirm("Hapus playlist melanggar ini?")) {
+                          onClick={() => {
+                            useToastStore.getState().showConfirm("Hapus playlist melanggar ini?", async () => {
                               await supabase.from('playlists').delete().eq('id', pl.id)
                               setPlaylistList(playlistList.filter(p => p.id !== pl.id))
-                            }
+                              alert("Playlist berhasil dihapus.")
+                            })
                           }}
                           className="text-accent hover:text-accent-hover p-1"
                         >

@@ -52,14 +52,14 @@ BEGIN
     SET premium_until = v_expiry
     WHERE id = p_user_id;
 
-    -- Update existing pending transaction if exists, otherwise insert
-    IF EXISTS (SELECT 1 FROM public.transactions WHERE user_id = p_user_id AND status = 'pending') THEN
+    -- Update existing pending transaction if exists (match by merchant_order_id), otherwise insert
+    IF EXISTS (SELECT 1 FROM public.transactions WHERE merchant_order_id = p_merchant_order_id) THEN
         UPDATE public.transactions
         SET status = 'completed', payment_method = p_payment_method, created_at = NOW()
-        WHERE id = (SELECT id FROM public.transactions WHERE user_id = p_user_id AND status = 'pending' ORDER BY created_at DESC LIMIT 1);
+        WHERE merchant_order_id = p_merchant_order_id;
     ELSE
-        INSERT INTO public.transactions (user_id, amount, status, payment_method, created_at)
-        VALUES (p_user_id, p_amount, 'completed', p_payment_method, NOW());
+        INSERT INTO public.transactions (user_id, amount, status, payment_method, merchant_order_id, created_at)
+        VALUES (p_user_id, p_amount, 'completed', p_payment_method, p_merchant_order_id, NOW());
     END IF;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -156,8 +156,9 @@ BEGIN
     END IF;
 END $$;
 
--- 5. Add notes column to transactions and create email_logs for debugging email delivery
+-- 5. Add notes column and merchant_order_id column to transactions, and create email_logs for debugging email delivery
 ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS notes TEXT;
+ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS merchant_order_id TEXT UNIQUE;
 
 CREATE TABLE IF NOT EXISTS public.email_logs (
     id BIGSERIAL PRIMARY KEY,

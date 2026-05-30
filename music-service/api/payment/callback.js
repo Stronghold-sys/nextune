@@ -1,54 +1,15 @@
 const { supabase } = require('../../lib/supabase');
 const crypto = require('crypto');
-const nodemailer = require('nodemailer');
 
 async function sendReceiptEmail({ email, username, packageName, amount, merchantOrderId, days }) {
-  const smtpHost = process.env.SMTP_HOST || 'smtp.resend.com';
-  const smtpPort = parseInt(process.env.SMTP_PORT || '587');
-  const smtpUser = process.env.SMTP_USER || 'resend';
-  const smtpPass = process.env.SMTP_PASS;
-  const smtpFrom = process.env.SMTP_FROM || `"NexTune" <noreply@nextune.my.id>`;
-
-  if (!smtpPass) {
-    console.warn("SMTP credentials not configured (SMTP_PASS is missing). Email receipt log:");
-    console.log(`Receipt for: ${email} (${username}) - Package: ${packageName} - Amount: Rp ${amount} - Order ID: ${merchantOrderId} - Duration: ${days} days`);
-    
-    try {
-      await supabase
-        .from('email_logs')
-        .insert({
-          recipient_email: email,
-          subject: 'Pembayaran Berhasil! Selamat Datang di NexTune Premium',
-          status: 'failed',
-          error_message: 'SMTP_PASS belum dikonfigurasi di Vercel. Salin password dari Supabase SMTP Settings (klik tombol Reveal di screenshot Anda) lalu pasang sebagai SMTP_PASS di Vercel.'
-        });
-      
-      await supabase
-        .from('transactions')
-        .update({ notes: 'Gagal kirim email: SMTP_PASS belum diatur di Vercel. Silakan salin password dari Supabase SMTP Settings (klik tombol Reveal di screenshot Anda) ke env Vercel.' })
-        .eq('id', merchantOrderId);
-    } catch (dbErr) {
-      console.warn("Gagal menyimpan log email ke database:", dbErr.message);
-    }
-    return;
-  }
-
-  const transporter = nodemailer.createTransport({
-    host: smtpHost,
-    port: smtpPort,
-    secure: smtpPort === 465,
-    auth: {
-      user: smtpUser,
-      pass: smtpPass,
-    },
-  });
+  const resendApiKey = process.env.RESEND_API_KEY;
+  const fromEmail = process.env.SMTP_FROM || 'noreply@nextune.my.id';
 
   const purchaseDate = new Date();
   const expiryDate = new Date();
   expiryDate.setDate(purchaseDate.getDate() + days);
 
   const formatLocalDate = (date) => {
-    // Return date string in Indonesian locale and WIB timezone
     return date.toLocaleDateString('id-ID', {
       weekday: 'long',
       year: 'numeric',
@@ -60,103 +21,87 @@ async function sendReceiptEmail({ email, username, packageName, amount, merchant
     }) + ' WIB';
   };
 
-  const mailOptions = {
-    from: `"NexTune Premium" <${smtpFrom}>`,
-    to: email,
-    subject: `Pembayaran Berhasil! Selamat Datang di NexTune Premium`,
-    html: `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px; background-color: #f9f9f9;">
-        <h2 style="color: #6366f1; text-align: center;">NexTune Premium</h2>
-        <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
-        <p>Halo, <strong>${username || 'Pengguna NexTune'}</strong>,</p>
-        <p>Terima kasih atas pembelian Anda! Pembayaran Anda telah berhasil diverifikasi. Akun Anda kini aktif sebagai anggota <strong>Premium</strong>.</p>
-        
-        <div style="background-color: #ffffff; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #6366f1;">
-          <h3 style="margin-top: 0; color: #333;">Detail Transaksi:</h3>
-          <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-            <tr>
-              <td style="padding: 5px 0; color: #666; width: 40%;"><strong>Order ID:</strong></td>
-              <td style="padding: 5px 0; color: #333;">${merchantOrderId}</td>
-            </tr>
-            <tr>
-              <td style="padding: 5px 0; color: #666;"><strong>Paket Langganan:</strong></td>
-              <td style="padding: 5px 0; color: #333;">${packageName}</td>
-            </tr>
-            <tr>
-              <td style="padding: 5px 0; color: #666;"><strong>Durasi:</strong></td>
-              <td style="padding: 5px 0; color: #333;">${days} Hari</td>
-            </tr>
-            <tr>
-              <td style="padding: 5px 0; color: #666;"><strong>Jumlah Pembayaran:</strong></td>
-              <td style="padding: 5px 0; color: #333; font-weight: bold; color: #10b981;">Rp ${amount.toLocaleString('id-ID')}</td>
-            </tr>
-            <tr>
-              <td style="padding: 5px 0; color: #666;"><strong>Tanggal Pembelian:</strong></td>
-              <td style="padding: 5px 0; color: #333;">${formatLocalDate(purchaseDate)}</td>
-            </tr>
-            <tr>
-              <td style="padding: 5px 0; color: #666;"><strong>Masa Berlaku Akhir:</strong></td>
-              <td style="padding: 5px 0; color: #333; font-weight: bold; color: #ef4444;">${formatLocalDate(expiryDate)}</td>
-            </tr>
-          </table>
-        </div>
-        
-        <p style="font-size: 14px; color: #555;">Kini Anda dapat menikmati pemutaran musik tanpa iklan, lirik yang presisi, kontrol equalizer HIFI, dan fitur premium lainnya secara penuh di NexTune.</p>
-        <p style="font-size: 14px; color: #555;">Jika Anda memiliki pertanyaan atau kendala mengenai transaksi Anda, silakan hubungi tim dukungan kami di <a href="mailto:support@nextune.my.id" style="color: #6366f1; text-decoration: none;">support@nextune.my.id</a>.</p>
-        
-        <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
-        <p style="font-size: 12px; text-align: center; color: #aaa; margin-top: 20px;">
-          © ${new Date().getFullYear()} NexTune Music. Hak Cipta Dilindungi.
-        </p>
+  const htmlBody = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px; background-color: #f9f9f9;">
+      <h2 style="color: #6366f1; text-align: center;">NexTune Premium</h2>
+      <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
+      <p>Halo, <strong>${username || 'Pengguna NexTune'}</strong>,</p>
+      <p>Terima kasih atas pembelian Anda! Pembayaran Anda telah berhasil diverifikasi. Akun Anda kini aktif sebagai anggota <strong>Premium</strong>.</p>
+      <div style="background-color: #ffffff; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #6366f1;">
+        <h3 style="margin-top: 0; color: #333;">Detail Transaksi:</h3>
+        <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+          <tr><td style="padding: 5px 0; color: #666; width: 40%;"><strong>Order ID:</strong></td><td style="padding: 5px 0; color: #333;">${merchantOrderId}</td></tr>
+          <tr><td style="padding: 5px 0; color: #666;"><strong>Paket Langganan:</strong></td><td style="padding: 5px 0; color: #333;">${packageName}</td></tr>
+          <tr><td style="padding: 5px 0; color: #666;"><strong>Durasi:</strong></td><td style="padding: 5px 0; color: #333;">${days} Hari</td></tr>
+          <tr><td style="padding: 5px 0; color: #666;"><strong>Jumlah Pembayaran:</strong></td><td style="padding: 5px 0; font-weight: bold; color: #10b981;">Rp ${amount.toLocaleString('id-ID')}</td></tr>
+          <tr><td style="padding: 5px 0; color: #666;"><strong>Tanggal Pembelian:</strong></td><td style="padding: 5px 0; color: #333;">${formatLocalDate(purchaseDate)}</td></tr>
+          <tr><td style="padding: 5px 0; color: #666;"><strong>Masa Berlaku Akhir:</strong></td><td style="padding: 5px 0; font-weight: bold; color: #ef4444;">${formatLocalDate(expiryDate)}</td></tr>
+        </table>
       </div>
-    `
+      <p style="font-size: 14px; color: #555;">Kini Anda dapat menikmati pemutaran musik tanpa iklan, lirik yang presisi, kontrol equalizer HIFI, dan fitur premium lainnya secara penuh di NexTune.</p>
+      <p style="font-size: 14px; color: #555;">Jika ada pertanyaan, hubungi kami di <a href="mailto:support@nextune.my.id" style="color: #6366f1;">support@nextune.my.id</a>.</p>
+      <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
+      <p style="font-size: 12px; text-align: center; color: #aaa;">© ${new Date().getFullYear()} NexTune Music. Hak Cipta Dilindungi.</p>
+    </div>
+  `;
+
+  const subject = 'Pembayaran Berhasil! Selamat Datang di NexTune Premium';
+
+  // Log helper
+  const logEmail = async (status, errorMsg) => {
+    try {
+      await supabase.from('email_logs').insert({
+        recipient_email: email,
+        subject,
+        status,
+        error_message: errorMsg || null
+      });
+      await supabase.from('transactions')
+        .update({ notes: status === 'success' ? `Email tanda terima sukses dikirim via Resend.` : `Email gagal dikirim: ${errorMsg}` })
+        .eq('merchant_order_id', merchantOrderId);
+    } catch (dbErr) {
+      console.warn('Gagal mencatat log email ke database:', dbErr.message);
+    }
   };
 
+  if (!resendApiKey) {
+    const errMsg = 'RESEND_API_KEY belum dikonfigurasi di Vercel. Masuk ke resend.com > API Keys > Create API Key, lalu tambahkan sebagai env var RESEND_API_KEY di Vercel.';
+    console.warn(errMsg);
+    console.log(`[Email Log] Penerima: ${email} | Paket: ${packageName} | Order: ${merchantOrderId}`);
+    await logEmail('failed', errMsg);
+    return;
+  }
+
   try {
-    const info = await transporter.sendMail(mailOptions);
-    console.log(`Receipt email sent successfully to ${email}. Message ID: ${info.messageId}`);
-    
-    try {
-      await supabase
-        .from('email_logs')
-        .insert({
-          recipient_email: email,
-          subject: mailOptions.subject,
-          status: 'success',
-          error_message: null
-        });
-      
-      await supabase
-        .from('transactions')
-        .update({ notes: `Email tanda terima sukses dikirim. Message ID: ${info.messageId}` })
-        .eq('id', merchantOrderId);
-    } catch (dbErr) {
-      console.warn("Gagal mencatat log email sukses ke database:", dbErr.message);
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${resendApiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        from: `NexTune Premium <${fromEmail}>`,
+        to: [email],
+        subject,
+        html: htmlBody
+      })
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.message || result.error || `Resend API error: ${response.status}`);
     }
-    
-    return info;
+
+    console.log(`Email berhasil dikirim ke ${email}. Resend ID: ${result.id}`);
+    await logEmail('success', null);
+    return result;
   } catch (mailError) {
-    console.error(`Failed to send receipt email to ${email}:`, mailError);
-    
-    try {
-      await supabase
-        .from('email_logs')
-        .insert({
-          recipient_email: email,
-          subject: mailOptions.subject,
-          status: 'failed',
-          error_message: mailError.message || String(mailError)
-        });
-      
-      await supabase
-        .from('transactions')
-        .update({ notes: `Email gagal dikirim: ${mailError.message || String(mailError)}` })
-        .eq('id', merchantOrderId);
-    } catch (dbErr) {
-      console.warn("Gagal mencatat log email gagal ke database:", dbErr.message);
-    }
+    console.error(`Gagal mengirim email ke ${email}:`, mailError.message);
+    await logEmail('failed', mailError.message || String(mailError));
   }
 }
+
 
 module.exports = async (req, res) => {
   // CORS headers

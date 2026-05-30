@@ -656,7 +656,7 @@ export default function Dashboard() {
       </aside>
 
       {/* Main Admin Content Container */}
-      <main className="flex-1 p-4 sm:p-6 overflow-y-auto max-w-5xl space-y-6">
+      <main className="flex-1 p-4 sm:p-6 overflow-y-auto w-full space-y-6">
         
         {/* 1. Ringkasan tab */}
         {activeTab === "ringkasan" && (

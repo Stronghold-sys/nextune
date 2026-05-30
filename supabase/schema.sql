@@ -19,24 +19,27 @@ CREATE POLICY "Profil dapat dibaca oleh siapa saja" ON public.profiles
 CREATE POLICY "Pengguna dapat mengubah profil sendiri" ON public.profiles
     FOR UPDATE USING (auth.uid() = id);
 
--- Trigger untuk membuat profil secara otomatis saat user mendaftar di auth.users
+-- Trigger untuk membuat profil secara otomatis HANYA SETELAH user memverifikasi OTP (email_confirmed_at tidak null)
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-    INSERT INTO public.profiles (id, username, full_name, avatar_url, role)
-    VALUES (
-        new.id,
-        split_part(new.email, '@', 1),
-        COALESCE(new.raw_user_meta_data->>'full_name', split_part(new.email, '@', 1)),
-        new.raw_user_meta_data->>'avatar_url',
-        'user'
-    );
+    -- Hanya buat profil jika email sudah dikonfirmasi dan profil belum ada
+    IF NEW.email_confirmed_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = NEW.id) THEN
+        INSERT INTO public.profiles (id, username, full_name, avatar_url, role)
+        VALUES (
+            NEW.id,
+            split_part(NEW.email, '@', 1),
+            COALESCE(NEW.raw_user_meta_data->>'full_name', split_part(NEW.email, '@', 1)),
+            NEW.raw_user_meta_data->>'avatar_url',
+            'user'
+        );
+    END IF;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
-CREATE TRIGGER on_auth_user_created
-    AFTER INSERT ON auth.users
+CREATE OR REPLACE TRIGGER on_auth_user_created
+    AFTER INSERT OR UPDATE ON auth.users
     FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 
@@ -311,3 +314,46 @@ CREATE POLICY "Hanya admin yang dapat membaca log" ON public.admin_logs
 
 CREATE POLICY "Sistem/Admin dapat menulis log" ON public.admin_logs
     FOR INSERT WITH CHECK (true);
+
+
+-- =========================================================================
+-- SEED DATA: AKUN ADMIN DEFAULT (admin@gmail.com / admin123)
+-- =========================================================================
+
+-- 1. Menambahkan user ke auth.users
+INSERT INTO auth.users (
+    instance_id, id, aud, role, email, encrypted_password, 
+    email_confirmed_at, raw_app_meta_data, raw_user_meta_data, 
+    created_at, updated_at, confirmation_token, email_change, 
+    email_change_token_new, recovery_token
+)
+SELECT
+    '00000000-0000-0000-0000-000000000000',
+    'd0d8b4c0-7f28-4034-b258-c9f285d852a4', -- ID Tetap untuk Admin
+    'authenticated',
+    'authenticated',
+    'admin@gmail.com',
+    crypt('admin123', gen_salt('bf')), -- Hash bcrypt otomatis untuk password 'admin123'
+    NOW(), -- Sudah terkonfirmasi (tidak butuh verifikasi OTP)
+    '{"provider": "email", "providers": ["email"]}',
+    '{"full_name": "Admin NexTune"}',
+    NOW(),
+    NOW(),
+    '',
+    '',
+    '',
+    ''
+WHERE NOT EXISTS (
+    SELECT 1 FROM auth.users WHERE email = 'admin@gmail.com'
+);
+
+-- 2. Menambahkan profil admin ke public.profiles
+INSERT INTO public.profiles (id, username, full_name, role)
+SELECT
+    'd0d8b4c0-7f28-4034-b258-c9f285d852a4',
+    'admin',
+    'Admin NexTune',
+    'admin'
+WHERE NOT EXISTS (
+    SELECT 1 FROM public.profiles WHERE id = 'd0d8b4c0-7f28-4034-b258-c9f285d852a4'
+);

@@ -108,6 +108,36 @@ export default function PremiumModal({ isOpen, onClose }) {
     return () => { if (pollInterval) clearInterval(pollInterval) }
   }, [paymentStep, user])
 
+const loadDuitkuScript = (isSandbox) => {
+  return new Promise((resolve) => {
+    const scriptId = 'duitku-js-script';
+    let script = document.getElementById(scriptId);
+    
+    if (script) {
+      const src = script.getAttribute('src');
+      const isCurrentSandbox = src.includes('sandbox');
+      if (isCurrentSandbox !== isSandbox) {
+        script.remove();
+        script = null;
+      }
+    }
+    
+    if (!script) {
+      script = document.createElement('script');
+      script.id = scriptId;
+      script.src = isSandbox 
+        ? 'https://app-sandbox.duitku.com/lib/js/duitku.js'
+        : 'https://app-prod.duitku.com/lib/js/duitku.js';
+      script.async = true;
+      script.onload = () => resolve(window.checkout);
+      script.onerror = () => resolve(null);
+      document.body.appendChild(script);
+    } else {
+      resolve(window.checkout);
+    }
+  });
+};
+
   if (!isOpen) return null
 
   // Handle package selection → create transaction → open Duitku Pop
@@ -138,11 +168,14 @@ export default function PremiumModal({ isOpen, onClose }) {
         throw new Error(resData.error || 'Gagal menghubungi payment gateway.')
       }
 
+      // Load correct Duitku POP script dynamically based on isSandbox flag from backend
+      const checkout = await loadDuitkuScript(resData.isSandbox !== false)
+
       // Use Duitku Pop if available, else redirect to paymentUrl
-      if (window.checkout && resData.reference && !resData.isSandboxFallback) {
+      if (checkout && resData.reference && !resData.isSandboxFallback) {
         // Duitku Pop JS loaded → open the popup with the reference
         setPaymentStep('waiting')
-        window.checkout.process(resData.reference, {
+        checkout.process(resData.reference, {
           successEvent: function () {
             checkUser()
             setPaymentStep('success')

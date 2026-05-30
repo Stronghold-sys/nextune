@@ -320,7 +320,32 @@ export const usePlayerStore = create((set, get) => {
           }
           audioUrl = data.streamUrl
         } catch (error) {
-          console.error("YouTube play error:", error)
+          console.warn("YouTube play error (attempting client-side fallback):", error)
+          
+          if (ytPlayer && isYtReady) {
+            try {
+              // Pause and clear global HTML5 audio player
+              globalAudio.pause()
+              globalAudio.src = ""
+              
+              // Load video in YouTube player
+              ytPlayer.cueVideoById({ videoId })
+              ytPlayer.playVideo()
+              
+              // Apply volume and playback settings
+              ytPlayer.setVolume(get().volume * 100)
+              if (typeof ytPlayer.setPlaybackRate === 'function') {
+                ytPlayer.setPlaybackRate(get().playbackSpeed)
+              }
+              
+              set({ activePlayer: 'youtube', loadingStream: false, isPlaying: true })
+              get().loadLyrics(song)
+              return
+            } catch (ytErr) {
+              console.error("YouTube Player fallback failed:", ytErr)
+            }
+          }
+          
           set({ isPlaying: false, loadingStream: false })
           const msg = error.message?.includes('bot') || error.message?.includes('Sign in')
             ? 'Lagu tidak dapat diputar saat ini karena deteksi bot YouTube. Coba lagi sebentar atau pilih lagu lain.'

@@ -95,11 +95,16 @@ module.exports = async (req, res) => {
       }
     };
 
+    const isProd = !merchantCode.startsWith('DS');
+    const duitkuUrl = isProd 
+      ? 'https://passport.duitku.com/webapi/api/merchant/paymentinquiry'
+      : 'https://sandbox.duitku.com/webapi/api/merchant/paymentinquiry';
+
     let reference = null;
     let paymentUrl = null;
 
     try {
-      const duitkuResp = await fetch('https://sandbox.duitku.com/webapi/api/merchant/v2/inquiry', {
+      const duitkuResp = await fetch(duitkuUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -117,7 +122,7 @@ module.exports = async (req, res) => {
         console.warn('Duitku inquiry returned non-success:', duitkuData);
       }
     } catch (duitkuErr) {
-      console.warn('Duitku Sandbox API call failed:', duitkuErr.message);
+      console.warn('Duitku API call failed:', duitkuErr.message);
     }
 
     // 6. Return response to frontend
@@ -131,7 +136,8 @@ module.exports = async (req, res) => {
       paymentUrl: paymentUrl || null,
       packageName,
       durationDays,
-      isSandboxFallback: !reference // flag so frontend knows if real or fallback
+      isSandboxFallback: !reference, // flag so frontend knows if real or fallback
+      isSandbox: !isProd
     });
 
   } catch (err) {

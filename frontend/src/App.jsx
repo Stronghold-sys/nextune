@@ -317,7 +317,7 @@ export default function App() {
       <MusicPlayer />
 
       {/* 4. MOBILE BOTTOM NAVIGATION BAR (Anchored at very bottom) */}
-      <nav className="sm:hidden fixed bottom-0 left-0 right-0 h-16 bg-background-sidebar border-t border-gray-border/60 flex justify-around items-center px-4 z-40 shadow-2xl backdrop-blur-md bg-opacity-95 select-none">
+      <nav className="sm:hidden fixed bottom-0 left-0 right-0 h-16 bg-background-sidebar border-t border-gray-border/60 flex justify-around items-center px-4 z-50 shadow-2xl backdrop-blur-md bg-opacity-95 select-none">
         {[
           { id: "home", label: "Beranda", icon: Compass },
           { id: "search", label: "Cari", icon: SearchIcon },

@@ -13,6 +13,26 @@ export default function MusicPlayer() {
     audioQuality, soundMode, setAudioQuality, setSoundMode
   } = usePlayerStore()
 
+  const isPremium = profile?.role === 'admin' || profile?.role === 'super_admin' || (profile?.premium_until && new Date(profile.premium_until) > new Date())
+
+  const handleSelectQuality = (quality, premiumRequired) => {
+    if (premiumRequired && !isPremium) {
+      alert("Fitur Kualitas Audio Premium (Stereo & Hi-Fi) hanya tersedia untuk versi premium. Silakan upgrade akun Anda!")
+      return
+    }
+    setAudioQuality(quality)
+    alert(`Kualitas suara berhasil diubah ke: ${quality.toUpperCase() === 'HIFI' ? 'Hi-Fi (Lossless)' : quality.toUpperCase()}`)
+  }
+
+  const handleSelectMode = (mode) => {
+    if (!isPremium) {
+      alert("Fitur Mode Suara Equalizer (Low, High, Hi-Fi) hanya tersedia untuk versi premium. Silakan upgrade akun Anda!")
+      return
+    }
+    setSoundMode(mode)
+    alert(`Mode equalizer suara diubah ke: ${mode.toUpperCase()}`)
+  }
+
   const [isMobileExpanded, setIsMobileExpanded] = useState(false)
   const [isMuted, setIsMuted] = useState(false)
   const [prevVolume, setPrevVolume] = useState(0.8)
@@ -460,7 +480,7 @@ export default function MusicPlayer() {
             animate={{ y: 0 }}
             exit={{ y: "100%" }}
             transition={{ type: "spring", damping: 25, stiffness: 220 }}
-            className="fixed inset-0 bg-background z-50 flex flex-col justify-between p-4 overflow-hidden select-none sm:hidden"
+            className="fixed top-0 left-0 right-0 bottom-[64px] bg-background z-50 flex flex-col justify-between p-4 overflow-hidden select-none sm:hidden"
           >
             {/* Blurry Album Art Background Layer */}
             <div className="absolute inset-0 z-0 opacity-20 filter blur-3xl pointer-events-none scale-125">

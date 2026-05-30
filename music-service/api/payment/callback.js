@@ -3,14 +3,14 @@ const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 
 async function sendReceiptEmail({ email, username, packageName, amount, merchantOrderId, days }) {
-  const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
-  const smtpPort = parseInt(process.env.SMTP_PORT || '587');
-  const smtpUser = process.env.SMTP_USER;
+  const smtpHost = process.env.SMTP_HOST || 'mail.nextune.my.id';
+  const smtpPort = parseInt(process.env.SMTP_PORT || '465');
+  const smtpUser = process.env.SMTP_USER || 'noreply@nextune.my.id';
   const smtpPass = process.env.SMTP_PASS;
-  const smtpFrom = process.env.SMTP_FROM || smtpUser || 'no-reply@nextune.my.id';
+  const smtpFrom = process.env.SMTP_FROM || smtpUser || 'noreply@nextune.my.id';
 
-  if (!smtpUser || !smtpPass) {
-    console.warn("SMTP credentials not configured (SMTP_USER or SMTP_PASS is missing). Email receipt log:");
+  if (!smtpPass) {
+    console.warn("SMTP credentials not configured (SMTP_PASS is missing). Email receipt log:");
     console.log(`Receipt for: ${email} (${username}) - Package: ${packageName} - Amount: Rp ${amount} - Order ID: ${merchantOrderId} - Duration: ${days} days`);
     
     try {
@@ -20,12 +20,12 @@ async function sendReceiptEmail({ email, username, packageName, amount, merchant
           recipient_email: email,
           subject: 'Pembayaran Berhasil! Selamat Datang di NexTune Premium',
           status: 'failed',
-          error_message: 'SMTP credentials not configured (SMTP_USER or SMTP_PASS is missing on server)'
+          error_message: 'SMTP credentials not configured (SMTP_PASS is missing on server)'
         });
       
       await supabase
         .from('transactions')
-        .update({ notes: 'Gagal kirim email: Variabel SMTP_USER atau SMTP_PASS belum dikonfigurasi di dashboard server.' })
+        .update({ notes: 'Gagal kirim email: Variabel SMTP_PASS belum dikonfigurasi di dashboard server.' })
         .eq('id', merchantOrderId);
     } catch (dbErr) {
       console.warn("Gagal menyimpan log email ke database:", dbErr.message);

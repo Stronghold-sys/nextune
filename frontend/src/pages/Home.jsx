@@ -13,9 +13,9 @@ const MOCK_GENRES = ["Pop", "Rock", "Hip Hop", "Jazz", "R&B", "K-Pop", "EDM", "I
 export default function Home({ onOpenAuth }) {
   const { user, profile } = useAuthStore()
   const { playSong } = usePlayerStore()
-  const [data, setData] = useState({ 
-    trendingSongs: [], 
-    popularArtists: [], 
+  const [data, setData] = useState({
+    trendingSongs: [],
+    popularArtists: [],
     popularAlbums: [],
     latestSongs: [],
     recommendations: []
@@ -26,7 +26,7 @@ export default function Home({ onOpenAuth }) {
 
   const [genreSongs, setGenreSongs] = useState([])
   const [genreLoading, setGenreLoading] = useState(false)
-  
+
   const [banners, setBanners] = useState([
     {
       title: "NexTune Premium",
@@ -99,19 +99,19 @@ export default function Home({ onOpenAuth }) {
             .select('songs(*)')
             .eq('user_id', user.id)
             .limit(6)
-          
+
           if (favs && favs.length > 0) {
             dbRecs = favs.map(f => f.songs).filter(Boolean)
           }
         }
-        
+
         if (dbRecs.length < 6) {
           const { data: randSongs } = await supabase
             .from('songs')
             .select('*')
             .eq('status', 'public')
             .limit(10)
-          
+
           const existingIds = new Set(dbRecs.map(s => s.id))
           const additional = (randSongs || []).filter(s => !existingIds.has(s.id))
           dbRecs = [...dbRecs, ...additional].slice(0, 6)
@@ -123,7 +123,7 @@ export default function Home({ onOpenAuth }) {
       const res = await fetch(`${MUSIC_SERVICE_URL}/home`)
       if (!res.ok) throw new Error("Gagal mengambil data")
       const json = await res.json()
-      
+
       setData({
         ...json,
         latestSongs: dbLatest.map(s => ({
@@ -147,7 +147,7 @@ export default function Home({ onOpenAuth }) {
       })
     } catch (err) {
       console.warn("FastAPI home service unavailable, using rich local fallback.", err)
-      
+
       setData({
         trendingSongs: [
           { id: "J2X5mJ3HDYE", title: "Lagu Santai Malam", artist: "Senja Musik", coverUrl: "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&q=80" },
@@ -213,7 +213,7 @@ export default function Home({ onOpenAuth }) {
             genre: selectedGenre,
             is_youtube: true
           }))
-        
+
         const existingIds = new Set(results.map(r => r.videoId || r.id || r.video_id))
         const additional = ytSongs.filter(s => !existingIds.has(s.videoId || s.id))
         results = [...results, ...additional].slice(0, 6)
@@ -370,7 +370,7 @@ export default function Home({ onOpenAuth }) {
               {displayBanners[currentBannerIdx]?.cta}
             </button>
           </div>
-          
+
           {/* Banner Dot Indicators */}
           <div className="absolute bottom-4 right-6 flex gap-2 z-10">
             {displayBanners.map((_, idx) => (
@@ -395,11 +395,10 @@ export default function Home({ onOpenAuth }) {
             <button
               key={genre}
               onClick={() => setSelectedGenre(genre)}
-              className={`flex-shrink-0 text-xs font-bold px-4 py-2 rounded-full border transition-all ${
-                selectedGenre === genre
+              className={`flex-shrink-0 text-xs font-bold px-4 py-2 rounded-full border transition-all ${selectedGenre === genre
                   ? 'bg-primary border-primary text-white shadow-md shadow-primary/20'
                   : 'bg-background-card border-gray-border text-gray-text hover:border-gray-muted'
-              }`}
+                }`}
             >
               {genre}
             </button>
@@ -480,7 +479,7 @@ export default function Home({ onOpenAuth }) {
           <Flame className="w-5 h-5 text-accent" />
           <h3 className="text-lg font-bold text-white tracking-tight">Lagu Populer Hari Ini</h3>
         </div>
-        
+
         {loading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {[1, 2, 3, 4, 5, 6].map((i) => <SongSkeleton key={i} />)}

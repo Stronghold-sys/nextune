@@ -1,5 +1,21 @@
 -- Skema Database NexTune untuk Supabase / PostgreSQL
 
+-- Hapus trigger & tabel lama jika ada agar proses instalasi bersih tanpa error "relation already exists"
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+DROP FUNCTION IF EXISTS public.handle_new_user CASCADE;
+DROP TABLE IF EXISTS public.admin_logs CASCADE;
+DROP TABLE IF EXISTS public.transactions CASCADE;
+DROP TABLE IF EXISTS public.premium_packages CASCADE;
+DROP TABLE IF EXISTS public.notifications CASCADE;
+DROP TABLE IF EXISTS public.banners CASCADE;
+DROP TABLE IF EXISTS public.lyrics CASCADE;
+DROP TABLE IF EXISTS public.play_history CASCADE;
+DROP TABLE IF EXISTS public.favorites CASCADE;
+DROP TABLE IF EXISTS public.playlist_songs CASCADE;
+DROP TABLE IF EXISTS public.playlists CASCADE;
+DROP TABLE IF EXISTS public.songs CASCADE;
+DROP TABLE IF EXISTS public.profiles CASCADE;
+
 -- 1. Tabel Profil Pengguna (Sinkron dengan auth.users)
 CREATE TABLE public.profiles (
     id UUID REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY,

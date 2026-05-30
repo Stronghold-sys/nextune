@@ -207,7 +207,6 @@ function initYouTubePlayer() {
     ytPlayer = new window.YT.Player('yt-player-placeholder', {
       height: '200',
       width: '200',
-      videoId: '',
       playerVars: {
         'playsinline': 1,
         'webkit-playsinline': 1,
@@ -253,15 +252,19 @@ function initYouTubePlayer() {
         },
         'onError': (e) => {
           console.error("YouTube Player Error:", e)
-          usePlayerStore.setState({ isPlaying: false, loadingStream: false })
           
-          let errorMsg = "Gagal memutar lagu dari YouTube. Silakan coba lagi."
-          if (e.data === 2) errorMsg = "Video ID tidak valid."
-          if (e.data === 5) errorMsg = "Pemutaran tidak didukung di pemutar tersemat."
-          if (e.data === 100) errorMsg = "Video tidak ditemukan atau telah dihapus."
-          if (e.data === 101 || e.data === 150) errorMsg = "Pemilik video tidak mengizinkan pemutaran di aplikasi lain."
-          
-          alert(errorMsg)
+          const store = usePlayerStore.getState()
+          if (store && store.activePlayer === 'youtube' && store.currentYoutubeVideoId) {
+            usePlayerStore.setState({ isPlaying: false, loadingStream: false, currentYoutubeVideoId: null })
+            
+            let errorMsg = "Gagal memutar lagu dari YouTube. Silakan coba lagi."
+            if (e.data === 2) errorMsg = "Video ID tidak valid."
+            if (e.data === 5) errorMsg = "Pemutaran tidak didukung di pemutar tersemat."
+            if (e.data === 100) errorMsg = "Video tidak ditemukan atau telah dihapus."
+            if (e.data === 101 || e.data === 150) errorMsg = "Pemilik video tidak mengizinkan pemutaran di aplikasi lain."
+            
+            alert(errorMsg)
+          }
         }
       }
     })
@@ -433,6 +436,7 @@ export const usePlayerStore = create((set, get) => {
     isLyricsSynced: false,
     loadingStream: false,
     activePlayer: 'audio', // 'audio' | 'youtube'
+    currentYoutubeVideoId: null, // Track currently playing YT video ID to filter spurious errors
     audioQuality: localStorage.getItem('audio_quality') || 'mono',
     soundMode: localStorage.getItem('sound_mode') || 'hifi',
 
@@ -460,7 +464,14 @@ export const usePlayerStore = create((set, get) => {
       set({ currentSong: song, progress: 0, duration: 0, loadingStream: true, isPlaying: false })
 
       let audioUrl = song.audioUrl || song.audio_url
-      const isYoutubeSong = song.is_youtube || song.videoId || (song.id && !audioUrl)
+      
+      // Strict detection to verify if it's a YouTube song (checking for 11-char video ID formats)
+      const isYoutubeSong = !!(
+        song.is_youtube || 
+        (song.videoId && song.videoId.length === 11) || 
+        (song.video_id && song.video_id.length === 11) || 
+        (!audioUrl && song.id && song.id.length === 11)
+      )
 
       // Handle custom queues
       if (newQueue) {
@@ -473,9 +484,12 @@ export const usePlayerStore = create((set, get) => {
       }
 
       if (isYoutubeSong) {
-        set({ activePlayer: 'audio' })
+        set({ activePlayer: 'audio', currentYoutubeVideoId: null })
         selectAudioElement(false) // YouTube streams use cleanAudio (no CORS effects)
-        const videoId = song.video_id || song.videoId || song.id
+        let videoId = song.video_id || song.videoId
+        if (!videoId && song.id && song.id.length === 11) {
+          videoId = song.id
+        }
         
         try {
           const response = await fetch(`${MUSIC_SERVICE_URL}/stream/${videoId}`)
@@ -487,15 +501,26 @@ export const usePlayerStore = create((set, get) => {
         } catch (error) {
           console.warn("YouTube play error (attempting client-side fallback):", error)
           
+          if (!videoId) {
+            console.error("YouTube videoId is missing for YouTube song:", song)
+            set({ isPlaying: false, loadingStream: false, currentYoutubeVideoId: null })
+            alert("Video ID tidak ditemukan untuk lagu ini.")
+            return
+          }
+          
           if (ytPlayer && isYtReady) {
             try {
               // Pause and clear global HTML5 audio player
               globalAudio.pause()
               globalAudio.src = ""
               
-              // Load video in YouTube player
-              ytPlayer.cueVideoById({ videoId })
-              ytPlayer.playVideo()
+              // Load and play video in YouTube player
+              if (typeof ytPlayer.loadVideoById === 'function') {
+                ytPlayer.loadVideoById(videoId)
+              } else {
+                ytPlayer.cueVideoById({ videoId })
+                ytPlayer.playVideo()
+              }
               
               // Apply volume and playback settings
               ytPlayer.setVolume(get().volume * 100)
@@ -503,7 +528,7 @@ export const usePlayerStore = create((set, get) => {
                 ytPlayer.setPlaybackRate(get().playbackSpeed)
               }
               
-              set({ activePlayer: 'youtube', loadingStream: false, isPlaying: true })
+              set({ activePlayer: 'youtube', currentYoutubeVideoId: videoId, loadingStream: false, isPlaying: true })
               get().loadLyrics(song)
               return
             } catch (ytErr) {
@@ -511,7 +536,7 @@ export const usePlayerStore = create((set, get) => {
             }
           }
           
-          set({ isPlaying: false, loadingStream: false })
+          set({ isPlaying: false, loadingStream: false, currentYoutubeVideoId: null })
           const msg = error.message?.includes('bot') || error.message?.includes('Sign in')
             ? 'Lagu tidak dapat diputar saat ini karena deteksi bot YouTube. Coba lagi sebentar atau pilih lagu lain.'
             : 'Gagal memutar lagu. Silakan coba lagi.'
@@ -519,7 +544,7 @@ export const usePlayerStore = create((set, get) => {
           return
         }
       } else {
-        set({ activePlayer: 'audio' })
+        set({ activePlayer: 'audio', currentYoutubeVideoId: null })
         selectAudioElement(true) // Local songs use effectsAudio (supports CORS effects)
       }
 

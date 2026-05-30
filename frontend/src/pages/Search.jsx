@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react'
-import { Search as SearchIcon, X, Clock, Play, Disc, User, Music, ArrowRight } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Search as SearchIcon, X, Clock, Play, ArrowRight } from 'lucide-react'
 import { usePlayerStore } from '../store/usePlayerStore'
 import { useAuthStore } from '../store/useAuthStore'
-import { SongSkeleton, CardSkeleton } from '../components/Skeleton/SkeletonLoader'
+import { SongSkeleton } from '../components/Skeleton/SkeletonLoader'
 
 const MUSIC_SERVICE_URL = import.meta.env.VITE_MUSIC_SERVICE_URL || 'http://localhost:8001'
 
@@ -17,18 +17,17 @@ export default function Search({ onOpenAuth }) {
   const [filter, setFilter] = useState("all") // 'all' | 'song' | 'album' | 'artist'
   
   // Search history & autocomplete
-  const [history, setHistory] = useState([])
+  const [history, setHistory] = useState(() => {
+    try {
+      const saved = localStorage.getItem("nextune_search_history")
+      return saved ? JSON.parse(saved) : []
+    } catch {
+      return []
+    }
+  })
   const [suggestions, setSuggestions] = useState([])
   const [showSuggestions, setShowSuggestions] = useState(false)
   const searchContainerRef = useRef(null)
-
-  // Load search history from localStorage
-  useEffect(() => {
-    const saved = localStorage.getItem("nextune_search_history")
-    if (saved) {
-      setHistory(JSON.parse(saved))
-    }
-  }, [])
 
   // Debounce query
   useEffect(() => {

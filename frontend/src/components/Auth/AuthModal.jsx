@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { useState, useEffect, useRef } from 'react'
+import { motion } from 'framer-motion'
 import { useAuthStore } from '../../store/useAuthStore'
 import { X, Eye, EyeOff, Lock, Mail, User, AlertCircle, RefreshCw } from 'lucide-react'
 
@@ -28,15 +28,18 @@ export default function AuthModal({ isOpen, onClose, defaultMode = 'login', onAu
 
   useEffect(() => {
     if (isOpen) {
-      setMode(defaultMode)
-      setEmail('')
-      setPassword('')
-      setConfirmPassword('')
-      setFullName('')
-      setErrors({})
-      setServerError('')
-      setSuccessMessage('')
-      setOtp(['', '', '', '', '', ''])
+      // Resetting form state when modal opens is intentional side effect
+      queueMicrotask(() => {
+        setMode(defaultMode)
+        setEmail('')
+        setPassword('')
+        setConfirmPassword('')
+        setFullName('')
+        setErrors({})
+        setServerError('')
+        setSuccessMessage('')
+        setOtp(['', '', '', '', '', ''])
+      })
     }
   }, [isOpen, defaultMode])
 
@@ -45,10 +48,14 @@ export default function AuthModal({ isOpen, onClose, defaultMode = 'login', onAu
     let interval = null
     if (mode === 'otp' && otpTimer > 0) {
       interval = setInterval(() => {
-        setOtpTimer((prev) => prev - 1)
+        setOtpTimer((prev) => {
+          if (prev <= 1) {
+            setCanResendOtp(true)
+            return 0
+          }
+          return prev - 1
+        })
       }, 1000)
-    } else if (otpTimer === 0) {
-      setCanResendOtp(true)
     }
     return () => clearInterval(interval)
   }, [mode, otpTimer])

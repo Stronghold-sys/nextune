@@ -126,6 +126,7 @@ export default function App() {
   }
 
   const handlePageChange = (page) => {
+    window.dispatchEvent(new CustomEvent('collapse-player'))
     if (page === 'admin') {
       setCurrentPage('admin')
       return

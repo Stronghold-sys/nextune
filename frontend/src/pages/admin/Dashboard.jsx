@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
   LayoutDashboard, Users, Music, Disc, UserCheck, Image, Bell, CreditCard, 
   Settings, LogOut, ArrowUpRight, Search, Trash2, Plus, ShieldCheck, 
-  Mail, Lock, RefreshCw, FileText, Sliders, CheckSquare, Ticket, Calendar
+  Mail, Lock, RefreshCw, FileText, Sliders, CheckSquare, Ticket
 } from 'lucide-react'
 import { useAuthStore } from '../../store/useAuthStore'
 import { supabase } from '../../supabaseClient'
@@ -43,6 +43,13 @@ export default function Dashboard() {
   const [showPremiumEditModal, setShowPremiumEditModal] = useState(false)
   const [selectedUserForPremium, setSelectedUserForPremium] = useState(null)
   const [premiumExpiryDays, setPremiumExpiryDays] = useState("30")
+
+  const previewExpiryLabel = useMemo(() => {
+    if (premiumExpiryDays === "0") return "Free Account"
+    if (premiumExpiryDays === "-1") return "Unlimited (Selamanya)"
+    const expiryDate = new Date(Date.now() + parseInt(premiumExpiryDays) * 24 * 60 * 60 * 1000) // eslint-disable-line react-hooks/purity
+    return formatToWIB(expiryDate.toISOString())
+  }, [premiumExpiryDays])
 
   // Search & Filter
   const [userSearch, setUserSearch] = useState("")
@@ -1662,12 +1669,7 @@ export default function Dashboard() {
                 <div className="p-3 bg-background/50 border border-gray-border rounded-xl">
                   <p className="text-[10px] text-gray-muted uppercase font-bold tracking-wider">Masa Aktif Baru</p>
                   <p className="text-xs font-bold text-primary-light mt-1">
-                    {premiumExpiryDays === "0" 
-                      ? "Free Account" 
-                      : premiumExpiryDays === "-1" 
-                        ? "Unlimited (Selamanya)" 
-                        : formatToWIB(new Date(Date.now() + parseInt(premiumExpiryDays) * 24 * 60 * 60 * 1000).toISOString())
-                    }
+                    {previewExpiryLabel}
                   </p>
                 </div>
 

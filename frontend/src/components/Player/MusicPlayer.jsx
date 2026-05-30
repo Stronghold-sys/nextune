@@ -56,6 +56,17 @@ export default function MusicPlayer() {
     }
   }, [progress])
 
+  // Listen to page changes to collapse mobile expanded player
+  useEffect(() => {
+    const handleCollapse = () => {
+      setIsMobileExpanded(false)
+    }
+    window.addEventListener('collapse-player', handleCollapse)
+    return () => {
+      window.removeEventListener('collapse-player', handleCollapse)
+    }
+  }, [])
+
   // Check if current song is in favorites
   useEffect(() => {
     const checkFavorite = async () => {
@@ -228,7 +239,7 @@ export default function MusicPlayer() {
             </p>
           </div>
           <button 
-            onClick={handleToggleFavorite}
+            onClick={(e) => { e.stopPropagation(); handleToggleFavorite(e); }}
             className="p-1 hover:text-white"
           >
             <Heart className={`w-4 h-4 shrink-0 transition-all ${isFavorited ? 'text-accent fill-accent scale-110' : 'text-gray-muted'}`} />
@@ -254,7 +265,7 @@ export default function MusicPlayer() {
                   userPlaylists.map(pl => (
                     <button
                       key={pl.id}
-                      onClick={() => handleAddToPlaylist(pl.id)}
+                      onClick={(e) => { e.stopPropagation(); handleAddToPlaylist(pl.id); }}
                       className="w-full text-left py-1 px-1.5 rounded hover:bg-background-hover text-white truncate"
                     >
                       {pl.name}
@@ -550,7 +561,7 @@ export default function MusicPlayer() {
                           userPlaylists.map(pl => (
                             <button
                               key={pl.id}
-                              onClick={() => handleAddToPlaylist(pl.id)}
+                              onClick={(e) => { e.stopPropagation(); handleAddToPlaylist(pl.id); }}
                               className="w-full text-left py-1 px-1.5 rounded hover:bg-background-hover text-white truncate"
                             >
                               {pl.name}

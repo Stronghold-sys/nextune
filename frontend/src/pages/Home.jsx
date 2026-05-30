@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { Play, Flame, User, Disc, Compass, Award, Music, Sparkles } from 'lucide-react'
+import { Play, Flame, User, Disc, Compass, Music, Sparkles } from 'lucide-react'
 import { usePlayerStore } from '../store/usePlayerStore'
 import { useAuthStore } from '../store/useAuthStore'
 import { supabase } from '../supabaseClient'

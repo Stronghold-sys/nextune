@@ -13,16 +13,16 @@ export default function ToastContainer() {
   }
 
   const borderGlowMap = {
-    success: 'border-emerald-500/25 shadow-emerald-950/20 bg-emerald-950/10 backdrop-blur-md',
-    error: 'border-rose-500/25 shadow-rose-950/20 bg-rose-950/10 backdrop-blur-md',
-    info: 'border-sky-500/25 shadow-sky-950/20 bg-sky-950/10 backdrop-blur-md',
-    warning: 'border-amber-500/25 shadow-amber-950/20 bg-amber-950/10 backdrop-blur-md'
+    success: 'border-emerald-500/35 shadow-emerald-950/30 bg-[#0c1f14]/95 backdrop-blur-md text-emerald-200',
+    error: 'border-rose-500/35 shadow-rose-950/30 bg-[#240e11]/95 backdrop-blur-md text-rose-200',
+    info: 'border-sky-500/35 shadow-sky-950/30 bg-[#0f1d2a]/95 backdrop-blur-md text-sky-200',
+    warning: 'border-amber-500/35 shadow-amber-950/30 bg-[#251b0f]/95 backdrop-blur-md text-amber-200'
   }
 
   return (
     <>
-      {/* Toast Notification Container */}
-      <div className="fixed top-5 right-5 z-[9999] flex flex-col gap-3 max-w-sm w-full pointer-events-none">
+      {/* Toast Notification Container - Centered on mobile, top-right on desktop */}
+      <div className="fixed top-4 left-1/2 -translate-x-1/2 sm:translate-x-0 sm:left-auto sm:top-5 sm:right-5 z-[9999] flex flex-col gap-3 w-[calc(100%-32px)] sm:w-80 pointer-events-none">
         <AnimatePresence>
           {toasts.map((toast) => (
             <motion.div
@@ -30,19 +30,19 @@ export default function ToastContainer() {
               initial={{ opacity: 0, y: -20, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
-              className={`pointer-events-auto flex items-start gap-3 p-4 rounded-2xl border shadow-xl transition-all ${borderGlowMap[toast.type] || borderGlowMap.info}`}
+              className={`pointer-events-auto flex items-center gap-3 py-3 px-4 rounded-2xl border shadow-2xl transition-all ${borderGlowMap[toast.type] || borderGlowMap.info}`}
             >
               {iconMap[toast.type] || iconMap.info}
               <div className="flex-1 min-w-0">
-                <p className="text-[11px] font-medium text-white leading-snug break-words">
+                <p className="text-xs font-semibold text-white leading-snug break-words">
                   {toast.message}
                 </p>
               </div>
               <button 
                 onClick={() => removeToast(toast.id)} 
-                className="text-gray-muted hover:text-white transition-colors"
+                className="text-gray-muted hover:text-white transition-colors p-1 shrink-0"
               >
-                <X className="w-3.5 h-3.5" />
+                <X className="w-4 h-4" />
               </button>
             </motion.div>
           ))}

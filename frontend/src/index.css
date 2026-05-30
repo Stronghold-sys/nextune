@@ -1,0 +1,58 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-background text-white font-sans antialiased overflow-x-hidden selection:bg-primary selection:text-white;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Custom Sleek Scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #07070B;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #1C1C2E;
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #6C63FF;
+  }
+}
+
+/* Custom Text Wrapping & Typographic Safety Utilities for 1.5K mobile screens */
+@layer utilities {
+  .text-shadow-premium {
+    text-shadow: 0 0 20px rgba(108, 99, 255, 0.4);
+  }
+  
+  .glassmorphism {
+    @apply bg-background-card bg-opacity-70 backdrop-blur-md border border-gray-border;
+  }
+  
+  .glassmorphism-light {
+    @apply bg-white bg-opacity-5 backdrop-blur-md border border-white border-opacity-10;
+  }
+}
+
+/* Base custom styles to make sure layout elements stay perfectly aligned on 6.67" displays */
+.mobile-safe-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 640px) {
+  .mobile-safe-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "music-service",
+  "version": "1.0.0",
+  "description": "NexTune Music Engine API (Node.js Edition)",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "cors": "^2.8.5",
+    "ytmusic-api": "^5.3.1",
+    "play-dl": "^1.9.7"
+  }
+}

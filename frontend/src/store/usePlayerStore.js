@@ -310,7 +310,7 @@ export const usePlayerStore = create((set, get) => {
 
       if (isYoutubeSong) {
         set({ activePlayer: 'audio' })
-        const videoId = song.videoId || song.id
+        const videoId = song.video_id || song.videoId || song.id
         
         try {
           const response = await fetch(`${MUSIC_SERVICE_URL}/stream/${videoId}`)

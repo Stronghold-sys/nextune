@@ -116,7 +116,7 @@ export default function MusicPlayer() {
         // First ensure the song metadata is in our songs table if it came from YouTube
         let songId = currentSong.id
         if (currentSong.is_youtube || currentSong.videoId) {
-          const videoId = currentSong.videoId || currentSong.id
+          const videoId = currentSong.video_id || currentSong.videoId || currentSong.id
           const { data: existingSong } = await supabase
             .from('songs')
             .select('id')
@@ -155,7 +155,7 @@ export default function MusicPlayer() {
     try {
       let songId = currentSong.id
       if (currentSong.is_youtube || currentSong.videoId) {
-        const videoId = currentSong.videoId || currentSong.id
+        const videoId = currentSong.video_id || currentSong.videoId || currentSong.id
         const { data: existingSong } = await supabase
           .from('songs')
           .select('id')

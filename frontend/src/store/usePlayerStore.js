@@ -9,25 +9,32 @@ let globalAudio = new Audio()
 // YouTube Player state holders
 let ytPlayer = null
 let ytProgressInterval = null
+let isYtReady = false
+let resolveYtReady = null
+let ytReadyPromise = new Promise((resolve) => {
+  resolveYtReady = resolve
+})
 
 // Load YouTube IFrame API
 if (typeof window !== 'undefined') {
-  // Load IFrame Player API script if not loaded
-  if (!window.YT) {
-    const tag = document.createElement('script')
-    tag.src = "https://www.youtube.com/iframe_api"
-    const firstScriptTag = document.getElementsByTagName('script')[0]
-    firstScriptTag.parentNode.insertBefore(tag, firstScriptTag)
-  }
-
-  // Register callback
+  // Save previous callback if any
+  const prevCallback = window.onYouTubeIframeAPIReady
   window.onYouTubeIframeAPIReady = () => {
+    if (prevCallback) prevCallback()
     initYouTubePlayer()
   }
 
   // Check if script is already loaded and ready
   if (window.YT && window.YT.Player) {
     setTimeout(initYouTubePlayer, 100)
+  } else {
+    // Inject script if not already present
+    if (!document.querySelector('script[src="https://www.youtube.com/iframe_api"]')) {
+      const tag = document.createElement('script')
+      tag.src = "https://www.youtube.com/iframe_api"
+      const firstScriptTag = document.getElementsByTagName('script')[0]
+      firstScriptTag.parentNode.insertBefore(tag, firstScriptTag)
+    }
   }
 }
 
@@ -38,18 +45,22 @@ function initYouTubePlayer() {
   if (!placeholder) {
     placeholder = document.createElement('div')
     placeholder.id = 'yt-player-placeholder'
-    placeholder.style.position = 'absolute'
-    placeholder.style.width = '0px'
-    placeholder.style.height = '0px'
-    placeholder.style.opacity = '0'
+    // Position off-screen but with a non-zero size to prevent browser throttling/suspension of hidden iframes
+    placeholder.style.position = 'fixed'
+    placeholder.style.left = '-9999px'
+    placeholder.style.top = '-9999px'
+    placeholder.style.width = '200px'
+    placeholder.style.height = '200px'
+    placeholder.style.opacity = '0.01'
     placeholder.style.pointerEvents = 'none'
+    placeholder.style.zIndex = '-9999'
     document.body.appendChild(placeholder)
   }
 
   try {
     ytPlayer = new window.YT.Player('yt-player-placeholder', {
-      height: '0',
-      width: '0',
+      height: '200',
+      width: '200',
       videoId: '',
       playerVars: {
         'playsinline': 1,
@@ -61,6 +72,10 @@ function initYouTubePlayer() {
         'iv_load_policy': 3
       },
       events: {
+        'onReady': () => {
+          isYtReady = true
+          if (resolveYtReady) resolveYtReady()
+        },
         'onStateChange': (event) => {
           const store = usePlayerStore.getState()
           if (event.data === window.YT.PlayerState.ENDED) {
@@ -84,7 +99,14 @@ function initYouTubePlayer() {
         'onError': (e) => {
           console.error("YouTube Player Error:", e)
           usePlayerStore.setState({ isPlaying: false, loadingStream: false })
-          alert("Gagal memutar lagu dari YouTube. Silakan coba lagi.")
+          
+          let errorMsg = "Gagal memutar lagu dari YouTube. Silakan coba lagi."
+          if (e.data === 2) errorMsg = "Video ID tidak valid."
+          if (e.data === 5) errorMsg = "Pemutaran tidak didukung di pemutar tersemat."
+          if (e.data === 100) errorMsg = "Video tidak ditemukan atau telah dihapus."
+          if (e.data === 101 || e.data === 150) errorMsg = "Pemilik video tidak mengizinkan pemutaran di aplikasi lain."
+          
+          alert(errorMsg)
         }
       }
     })
@@ -195,8 +217,10 @@ export const usePlayerStore = create((set, get) => {
       if (isPlaying) {
         if (activePlayer === 'audio') {
           globalAudio.pause()
-        } else if (activePlayer === 'youtube' && ytPlayer && typeof ytPlayer.pauseVideo === 'function') {
-          ytPlayer.pauseVideo()
+        } else if (activePlayer === 'youtube' && ytPlayer && isYtReady) {
+          try {
+            ytPlayer.pauseVideo()
+          } catch (e) { console.warn(e) }
         }
       }
       stopYtProgressTimer()
@@ -221,25 +245,52 @@ export const usePlayerStore = create((set, get) => {
         const videoId = song.videoId || song.id
         
         try {
-          if (!ytPlayer || typeof ytPlayer.loadVideoById !== 'function') {
+          if (!ytPlayer) {
             initYouTubePlayer()
-            console.log("YouTube player not initialized, trying to wait...")
-            await new Promise(resolve => setTimeout(resolve, 1000))
-            if (!ytPlayer || typeof ytPlayer.loadVideoById !== 'function') {
-              throw new Error("YouTube IFrame Player tidak tersedia.")
-            }
           }
           
-          ytPlayer.setVolume(get().volume * 100)
-          ytPlayer.setPlaybackRate(get().playbackSpeed)
-          ytPlayer.loadVideoById(videoId)
-          ytPlayer.playVideo()
+          // Wait for readiness with timeout
+          if (!isYtReady) {
+            console.log("Waiting for YouTube player to be ready...")
+            await Promise.race([
+              ytReadyPromise,
+              new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout waiting for YouTube player")), 5000))
+            ])
+          }
+
+          if (!ytPlayer || typeof ytPlayer.loadVideoById !== 'function') {
+            throw new Error("YouTube IFrame Player tidak tersedia.")
+          }
           
-          get().loadLyrics(song)
+          try {
+            ytPlayer.setVolume(get().volume * 100)
+            ytPlayer.setPlaybackRate(get().playbackSpeed)
+            ytPlayer.loadVideoById(videoId)
+            ytPlayer.playVideo()
+            
+            get().loadLyrics(song)
+          } catch (playerErr) {
+            console.error("Player call error, re-initializing:", playerErr)
+            // Re-create player if it crashed or got detached
+            isYtReady = false
+            ytPlayer = null
+            ytReadyPromise = new Promise((resolve) => { resolveYtReady = resolve })
+            initYouTubePlayer()
+            await Promise.race([
+              ytReadyPromise,
+              new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout waiting for YouTube player")), 5000))
+            ])
+            ytPlayer.setVolume(get().volume * 100)
+            ytPlayer.setPlaybackRate(get().playbackSpeed)
+            ytPlayer.loadVideoById(videoId)
+            ytPlayer.playVideo()
+            
+            get().loadLyrics(song)
+          }
         } catch (error) {
           console.error("YouTube play error:", error)
           set({ isPlaying: false, loadingStream: false })
-          alert("Gagal memutar lagu dari YouTube. Harap coba lagi.")
+          alert("Gagal memutar lagu dari YouTube: " + error.message)
         }
       } else {
         set({ activePlayer: 'audio' })

@@ -176,6 +176,33 @@ export default function PremiumModal({ isOpen, onClose }) {
 
       setDuitkuTx(resData);
       setPaymentStep('duitku_checkout');
+
+      // Trigger Duitku Pop-up Payment Gateway
+      if (window.checkout) {
+        window.checkout.process(resData.reference, {
+          successEvent: function (result) {
+            console.log('Duitku Success:', result);
+            setPaymentStep('success');
+            checkUser();
+          },
+          pendingEvent: function (result) {
+            console.log('Duitku Pending:', result);
+          },
+          errorEvent: function (result) {
+            console.error('Duitku Error:', result);
+            alert('Pembayaran gagal atau dibatalkan.');
+            setPaymentStep('select_payment');
+          },
+          closeEvent: function () {
+            console.log('Duitku Popup Closed');
+          }
+        });
+      } else {
+        console.warn("Duitku JS not loaded, falling back to new window redirect");
+        if (resData.paymentUrl) {
+          window.open(resData.paymentUrl, '_blank');
+        }
+      }
     } catch (error) {
       console.error("Duitku Payment Error:", error);
       alert("Terjadi kesalahan saat memproses pembayaran: " + error.message);

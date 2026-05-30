@@ -29,7 +29,7 @@ function initWebAudio() {
     
     monoGainNode = audioCtx.createGain()
     monoGainNode.channelCount = 1
-    monoGainNode.channelCountMode = 'clamped'
+    monoGainNode.channelCountMode = 'explicit'
   } catch (err) {
     console.warn("Web Audio API not fully supported or restricted by browser:", err)
   }
@@ -48,17 +48,19 @@ function updateAudioEffects(quality, mode) {
       sourceNode.disconnect()
       filterNode.disconnect()
       monoGainNode.disconnect()
-    } catch (e) {}
+    } catch {
+      // ignore
+    }
 
     // Apply Sound Mode Filter (EQ Character)
     if (mode === 'low') {
       filterNode.type = 'lowpass'
-      filterNode.frequency.value = 2500 // Warm sound
+      filterNode.frequency.value = 1000 // Cut high frequencies for rich bass/warmth
     } else if (mode === 'high') {
       filterNode.type = 'highpass'
-      filterNode.frequency.value = 800 // Bright sound
+      filterNode.frequency.value = 2000 // Cut low frequencies for bright treble/vocals
     } else {
-      filterNode.type = 'allpass' // Hi-Fi / Original flat EQ
+      filterNode.type = 'allpass' // Flat / original dynamic Hi-Fi sound
     }
 
     // Apply Audio Quality (Mono downmix vs Stereo bypass)
@@ -79,10 +81,6 @@ function updateAudioEffects(quality, mode) {
 let ytPlayer = null
 let ytProgressInterval = null
 let isYtReady = false
-let resolveYtReady = null
-let ytReadyPromise = new Promise((resolve) => {
-  resolveYtReady = resolve
-})
 
 // Load YouTube IFrame API
 if (typeof window !== 'undefined') {
@@ -143,7 +141,6 @@ function initYouTubePlayer() {
       events: {
         'onReady': () => {
           isYtReady = true
-          if (resolveYtReady) resolveYtReady()
         },
         'onStateChange': (event) => {
           const store = usePlayerStore.getState()
@@ -312,82 +309,48 @@ export const usePlayerStore = create((set, get) => {
       }
 
       if (isYoutubeSong) {
-        set({ activePlayer: 'youtube' })
+        set({ activePlayer: 'audio' })
         const videoId = song.videoId || song.id
         
         try {
-          if (!ytPlayer) {
-            initYouTubePlayer()
+          const response = await fetch(`${MUSIC_SERVICE_URL}/stream/${videoId}`)
+          const data = await response.json()
+          if (!response.ok || !data.streamUrl) {
+            throw new Error(data.error || 'Gagal mengekstrak URL audio YouTube.')
           }
-          
-          // Wait for readiness with timeout
-          if (!isYtReady) {
-            console.log("Waiting for YouTube player to be ready...")
-            await Promise.race([
-              ytReadyPromise,
-              new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout waiting for YouTube player")), 5000))
-            ])
-          }
-
-          if (!ytPlayer || typeof ytPlayer.loadVideoById !== 'function') {
-            throw new Error("YouTube IFrame Player tidak tersedia.")
-          }
-          
-          try {
-            ytPlayer.setVolume(get().volume * 100)
-            ytPlayer.setPlaybackRate(get().playbackSpeed)
-            ytPlayer.loadVideoById(videoId)
-            ytPlayer.playVideo()
-            
-            get().loadLyrics(song)
-          } catch (playerErr) {
-            console.error("Player call error, re-initializing:", playerErr)
-            // Re-create player if it crashed or got detached
-            isYtReady = false
-            ytPlayer = null
-            ytReadyPromise = new Promise((resolve) => { resolveYtReady = resolve })
-            initYouTubePlayer()
-            await Promise.race([
-              ytReadyPromise,
-              new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout waiting for YouTube player")), 5000))
-            ])
-            ytPlayer.setVolume(get().volume * 100)
-            ytPlayer.setPlaybackRate(get().playbackSpeed)
-            ytPlayer.loadVideoById(videoId)
-            ytPlayer.playVideo()
-            
-            get().loadLyrics(song)
-          }
+          audioUrl = data.streamUrl
         } catch (error) {
           console.error("YouTube play error:", error)
           set({ isPlaying: false, loadingStream: false })
           alert("Gagal memutar lagu dari YouTube: " + error.message)
+          return
         }
       } else {
         set({ activePlayer: 'audio' })
-        if (!audioUrl) {
-          set({ loadingStream: false })
-          alert("Audio URL tidak valid.")
-          return
-        }
+      }
 
-        try {
-          globalAudio.src = audioUrl
-          globalAudio.load()
-          globalAudio.volume = get().volume
-          globalAudio.playbackRate = get().playbackSpeed
-          
-          // Apply Web Audio quality & mode settings
-          updateAudioEffects(get().audioQuality, get().soundMode)
-          
-          await globalAudio.play()
-          set({ isPlaying: true, loadingStream: false })
-          
-          get().loadLyrics(song)
-        } catch (error) {
-          console.error("Audio play error:", error)
-          set({ isPlaying: false, loadingStream: false })
-        }
+      if (!audioUrl) {
+        set({ loadingStream: false })
+        alert("Audio URL tidak valid.")
+        return
+      }
+
+      try {
+        globalAudio.src = audioUrl
+        globalAudio.load()
+        globalAudio.volume = get().volume
+        globalAudio.playbackRate = get().playbackSpeed
+        
+        // Apply Web Audio quality & mode settings
+        updateAudioEffects(get().audioQuality, get().soundMode)
+        
+        await globalAudio.play()
+        set({ isPlaying: true, loadingStream: false })
+        
+        get().loadLyrics(song)
+      } catch (error) {
+        console.error("Audio play error:", error)
+        set({ isPlaying: false, loadingStream: false })
       }
     },
 
@@ -567,7 +530,7 @@ export const usePlayerStore = create((set, get) => {
     },
 
     removeFromQueue: (songId) => {
-      const { queue, currentIndex, currentSong } = get()
+      const { queue, currentSong } = get()
       const newQueue = queue.filter(s => (s.id || s.videoId) !== songId)
       
       let newIdx = newQueue.findIndex(s => (s.id || s.videoId) === (currentSong?.id || currentSong?.videoId))

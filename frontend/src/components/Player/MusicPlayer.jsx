@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, Volume2, VolumeX, ListMusic, Clock, Gauge, ChevronUp, ChevronDown, Heart, Plus, ListCollapse, Sliders } from 'lucide-react'
+import { Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, Volume2, VolumeX, ListMusic, Clock, Gauge, ChevronDown, Heart, Plus, ListCollapse, Sliders } from 'lucide-react'
 import { usePlayerStore } from '../../store/usePlayerStore'
 import { useAuthStore } from '../../store/useAuthStore'
 import { supabase } from '../../supabaseClient'
@@ -8,7 +8,7 @@ import { supabase } from '../../supabaseClient'
 export default function MusicPlayer() {
   const { user, profile } = useAuthStore()
   const {
-    currentSong, isPlaying, progress, duration, volume, playbackSpeed, repeatMode, shuffle, sleepTimer, lyrics, loadingStream,
+    currentSong, isPlaying, progress, duration, volume, playbackSpeed, repeatMode, shuffle, sleepTimer, lyrics,
     togglePlay, next, prev, seek, setVolume, setPlaybackSpeed, setRepeatMode, setShuffle, setSleepTimer, queue, removeFromQueue,
     audioQuality, soundMode, setAudioQuality, setSoundMode
   } = usePlayerStore()
@@ -24,13 +24,13 @@ export default function MusicPlayer() {
     alert(`Kualitas suara berhasil diubah ke: ${quality.toUpperCase() === 'HIFI' ? 'Hi-Fi (Lossless)' : quality.toUpperCase()}`)
   }
 
-  const handleSelectMode = (mode) => {
-    if (!isPremium) {
-      alert("Fitur Mode Suara Equalizer (Low, High, Hi-Fi) hanya tersedia untuk versi premium. Silakan upgrade akun Anda!")
+  const handleSelectMode = (mode, premiumRequired) => {
+    if (premiumRequired && !isPremium) {
+      alert("Fitur Mode Suara Equalizer Premium (High & Hi-Fi) hanya tersedia untuk versi premium. Silakan upgrade akun Anda!")
       return
     }
     setSoundMode(mode)
-    alert(`Mode equalizer suara diubah ke: ${mode.toUpperCase()}`)
+    alert(`Mode equalizer suara diubah ke: ${mode.toUpperCase() === 'HIFI' ? 'Hi-Fi Dynamic' : mode.toUpperCase()}`)
   }
 
   const [isMobileExpanded, setIsMobileExpanded] = useState(false)
@@ -68,7 +68,7 @@ export default function MusicPlayer() {
           .eq('song_id', currentSong.id)
           .maybeSingle()
         setIsFavorited(!!data)
-      } catch (e) {
+      } catch {
         setIsFavorited(false)
       }
     }
@@ -180,7 +180,7 @@ export default function MusicPlayer() {
       if (error) throw error
       alert("Lagu berhasil ditambahkan ke playlist!")
       setShowPlaylistMenu(false)
-    } catch (err) {
+    } catch {
       alert("Lagu mungkin sudah ada di playlist ini.")
     }
   }
@@ -426,17 +426,22 @@ export default function MusicPlayer() {
                   <p className="text-[10px] text-gray-text font-bold uppercase tracking-wider pb-1 border-b border-gray-border/40">Mode Suara</p>
                   <div className="flex flex-col gap-1">
                     {[
-                      { id: 'low', label: 'Low (Bass/Warm)', premium: true },
+                      { id: 'low', label: 'Low (Bass/Warm)', premium: false },
                       { id: 'high', label: 'High (Treble/Bright)', premium: true },
                       { id: 'hifi', label: 'Hi-Fi Dynamic', premium: true }
                     ].map(m => (
                       <button
                         key={m.id}
-                        onClick={() => handleSelectMode(m.id)}
-                        className={`flex items-center justify-between w-full text-left py-1 px-1.5 rounded hover:bg-background-hover ${soundMode === m.id && isPremium ? 'text-primary font-bold bg-primary/10' : 'text-white'}`}
+                        onClick={() => handleSelectMode(m.id, m.premium)}
+                        className={`flex items-center justify-between w-full text-left py-1 px-1.5 rounded hover:bg-background-hover ${soundMode === m.id ? 'text-primary font-bold bg-primary/10' : 'text-white'}`}
                       >
                         <span>{m.label}</span>
-                        <span className="text-[8px] bg-accent/20 text-accent border border-accent/30 font-bold px-1 rounded">PRO</span>
+                        {m.premium && (
+                          <span className="text-[8px] bg-accent/20 text-accent border border-accent/30 font-bold px-1 rounded">PRO</span>
+                        )}
+                        {!m.premium && (
+                          <span className="text-[8px] text-gray-muted font-normal">GRATIS</span>
+                        )}
                       </button>
                     ))}
                   </div>
@@ -664,17 +669,22 @@ export default function MusicPlayer() {
                     <p className="text-[10px] text-gray-text font-bold uppercase tracking-wider pb-1 border-b border-gray-border/40">Mode Suara</p>
                     <div className="flex flex-col gap-1">
                       {[
-                        { id: 'low', label: 'Low (Bass/Warm)', premium: true },
+                        { id: 'low', label: 'Low (Bass/Warm)', premium: false },
                         { id: 'high', label: 'High (Treble/Bright)', premium: true },
                         { id: 'hifi', label: 'Hi-Fi Dynamic', premium: true }
                       ].map(m => (
                         <button
                           key={m.id}
-                          onClick={() => handleSelectMode(m.id)}
-                          className={`flex items-center justify-between w-full text-left py-1 px-1.5 rounded hover:bg-background-hover ${soundMode === m.id && isPremium ? 'text-primary font-bold bg-primary/10' : 'text-white'}`}
+                          onClick={() => handleSelectMode(m.id, m.premium)}
+                          className={`flex items-center justify-between w-full text-left py-1 px-1.5 rounded hover:bg-background-hover ${soundMode === m.id ? 'text-primary font-bold bg-primary/10' : 'text-white'}`}
                         >
                           <span>{m.label}</span>
-                          <span className="text-[8px] bg-accent/20 text-accent border border-accent/30 font-bold px-1 rounded">PRO</span>
+                          {m.premium && (
+                            <span className="text-[8px] bg-accent/20 text-accent border border-accent/30 font-bold px-1 rounded">PRO</span>
+                          )}
+                          {!m.premium && (
+                            <span className="text-[8px] text-gray-muted font-normal">GRATIS</span>
+                          )}
                         </button>
                       ))}
                     </div>

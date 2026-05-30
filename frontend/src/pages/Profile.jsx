@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { User, Key, BarChart2, LogOut, CheckCircle2, AlertCircle, RefreshCw, Crown } from 'lucide-react'
+import { User, Key, BarChart2, LogOut, CheckCircle2, AlertCircle, RefreshCw, Crown, Settings } from 'lucide-react'
 import { useAuthStore } from '../store/useAuthStore'
 
 export default function Profile() {
@@ -89,13 +89,22 @@ export default function Profile() {
           </div>
         </div>
 
-        <button
-          onClick={logout}
-          className="flex items-center gap-1.5 px-4 py-2 border border-accent/30 rounded-xl text-xs font-bold text-accent hover:bg-accent/10 transition-colors"
-        >
-          <LogOut className="w-4 h-4" />
-          Keluar Akun
-        </button>
+        <div className="flex flex-col sm:flex-row gap-2 shrink-0">
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent('open-settings-modal'))}
+            className="flex items-center justify-center gap-1.5 px-4 py-2 border border-primary/30 rounded-xl text-xs font-bold text-primary hover:bg-primary/10 transition-colors"
+          >
+            <Settings className="w-4 h-4" />
+            Pengaturan
+          </button>
+          <button
+            onClick={logout}
+            className="flex items-center justify-center gap-1.5 px-4 py-2 border border-accent/30 rounded-xl text-xs font-bold text-accent hover:bg-accent/10 transition-colors"
+          >
+            <LogOut className="w-4 h-4" />
+            Keluar Akun
+          </button>
+        </div>
       </div>
 
       {/* STATUS LANGGANAN CARD */}

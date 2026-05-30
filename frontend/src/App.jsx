@@ -37,13 +37,18 @@ export default function App() {
     const handlePremiumRequired = () => {
       setIsPremiumModalOpen(true)
     }
+    const handleOpenSettings = () => {
+      setIsSettingsOpen(true)
+    }
 
     window.addEventListener('premium-required', handlePremiumRequired)
     window.addEventListener('open-premium-modal', handlePremiumRequired)
+    window.addEventListener('open-settings-modal', handleOpenSettings)
 
     return () => {
       window.removeEventListener('premium-required', handlePremiumRequired)
       window.removeEventListener('open-premium-modal', handlePremiumRequired)
+      window.removeEventListener('open-settings-modal', handleOpenSettings)
     }
   }, [])
 
@@ -155,14 +160,7 @@ export default function App() {
         {/* Header Right Actions */}
         <div className="flex items-center gap-4">
 
-          {/* Settings Button */}
-          <button 
-            onClick={() => setIsSettingsOpen(true)}
-            className="p-1.5 hover:text-white text-gray-text transition-colors"
-            title="Pengaturan"
-          >
-            <Settings className="w-5 h-5" />
-          </button>
+          {/* Settings Button moved to Profile page */}
 
           {/* Notification Button & Red Dot indicator */}
           <div className="relative">

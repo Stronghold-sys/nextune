@@ -4,6 +4,7 @@ import { Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, Volume2, VolumeX, 
 import { usePlayerStore } from '../../store/usePlayerStore'
 import { useAuthStore, checkIsPremium } from '../../store/useAuthStore'
 import { supabase } from '../../supabaseClient'
+import { useToastStore } from '../../store/useToastStore'
 
 export default function MusicPlayer() {
   const { user, profile } = useAuthStore()
@@ -67,16 +68,54 @@ export default function MusicPlayer() {
     }
   }, [])
 
+  // Helper: dapatkan UUID Supabase untuk lagu manapun (termasuk YouTube)
+  const resolveDbSongId = async (song) => {
+    if (!song) return null
+    // Sudah UUID Supabase
+    if (song.id && song.id.length === 36) return song.id
+    // Cari berdasarkan video_id
+    const videoId = song.video_id || song.videoId || (song.id?.length === 11 ? song.id : null)
+    if (!videoId) return null
+    try {
+      const { data: existing } = await supabase
+        .from('songs')
+        .select('id')
+        .eq('video_id', videoId)
+        .maybeSingle()
+      if (existing) return existing.id
+      // Buat record baru jika belum ada
+      const { data: newSong, error } = await supabase
+        .from('songs')
+        .insert({
+          title: song.title || 'Unknown',
+          artist: song.artist || 'Unknown Artist',
+          cover_url: song.coverUrl || song.cover_url || null,
+          video_id: videoId,
+          genre: song.genre || null,
+          is_youtube: true,
+          status: 'public'
+        })
+        .select('id')
+        .single()
+      if (error) return null
+      return newSong?.id || null
+    } catch {
+      return null
+    }
+  }
+
   // Check if current song is in favorites
   useEffect(() => {
     const checkFavorite = async () => {
-      if (!user || !currentSong) return
+      if (!user || !currentSong) return setIsFavorited(false)
       try {
+        const songId = await resolveDbSongId(currentSong)
+        if (!songId) return setIsFavorited(false)
         const { data } = await supabase
           .from('favorites')
           .select('id')
           .eq('user_id', user.id)
-          .eq('song_id', currentSong.id)
+          .eq('song_id', songId)
           .maybeSingle()
         setIsFavorited(!!data)
       } catch {
@@ -84,7 +123,7 @@ export default function MusicPlayer() {
       }
     }
     checkFavorite()
-  }, [currentSong, user])
+  }, [currentSong?.id, currentSong?.videoId, user?.id])
 
   // Fetch user playlists when menu is opened
   useEffect(() => {
@@ -106,93 +145,59 @@ export default function MusicPlayer() {
   if (!currentSong) return null
 
   const handleToggleFavorite = async (e) => {
-    e.stopPropagation()
-    if (!user) return alert("Silakan masuk untuk menyukai lagu")
+    if (e) e.stopPropagation()
+    if (!user) {
+      useToastStore.getState().showToast('Silakan masuk untuk menyukai lagu', 'info')
+      return
+    }
     try {
-      if (isFavorited) {
-        await supabase.from('favorites').delete().eq('user_id', user.id).eq('song_id', currentSong.id)
-        setIsFavorited(false)
-      } else {
-        // First ensure the song metadata is in our songs table if it came from YouTube
-        let songId = currentSong.id
-        if (currentSong.is_youtube || currentSong.videoId) {
-          const videoId = currentSong.video_id || currentSong.videoId || currentSong.id
-          const { data: existingSong } = await supabase
-            .from('songs')
-            .select('id')
-            .eq('video_id', videoId)
-            .maybeSingle()
-          
-          if (existingSong) {
-            songId = existingSong.id
-          } else {
-            const { data: newSong } = await supabase
-              .from('songs')
-              .insert({
-                title: currentSong.title,
-                artist: currentSong.artist,
-                cover_url: currentSong.coverUrl || currentSong.cover_url,
-                video_id: videoId,
-                is_youtube: true,
-                status: 'public'
-              })
-              .select()
-              .single()
-            songId = newSong.id
-          }
-        }
+      const songId = await resolveDbSongId(currentSong)
+      if (!songId) {
+        useToastStore.getState().showToast('Gagal memproses lagu ini', 'error')
+        return
+      }
 
+      if (isFavorited) {
+        await supabase.from('favorites').delete().eq('user_id', user.id).eq('song_id', songId)
+        setIsFavorited(false)
+        useToastStore.getState().showToast('Dihapus dari favorit', 'info')
+      } else {
         await supabase.from('favorites').insert({ user_id: user.id, song_id: songId })
         setIsFavorited(true)
+        useToastStore.getState().showToast('❤️ Ditambahkan ke favorit!', 'success')
       }
     } catch (err) {
-      console.error(err)
+      console.error('Toggle favorite error:', err)
+      useToastStore.getState().showToast('Terjadi kesalahan, coba lagi', 'error')
     }
   }
 
   const handleAddToPlaylist = async (playlistId) => {
-    if (!user) return alert("Silakan masuk untuk menambahkan lagu ke playlist")
+    if (!user) {
+      useToastStore.getState().showToast('Silakan masuk untuk menambahkan ke playlist', 'info')
+      return
+    }
     try {
-      let songId = currentSong.id
-      if (currentSong.is_youtube || currentSong.videoId) {
-        const videoId = currentSong.video_id || currentSong.videoId || currentSong.id
-        const { data: existingSong } = await supabase
-          .from('songs')
-          .select('id')
-          .eq('video_id', videoId)
-          .maybeSingle()
-        
-        if (existingSong) {
-          songId = existingSong.id
-        } else {
-          const { data: newSong } = await supabase
-            .from('songs')
-            .insert({
-              title: currentSong.title,
-              artist: currentSong.artist,
-              cover_url: currentSong.coverUrl || currentSong.cover_url,
-              video_id: videoId,
-              is_youtube: true,
-              status: 'public'
-            })
-            .select()
-            .single()
-          songId = newSong.id
-        }
+      const songId = await resolveDbSongId(currentSong)
+      if (!songId) {
+        useToastStore.getState().showToast('Gagal memproses lagu ini', 'error')
+        return
       }
 
       const { error } = await supabase
         .from('playlist_songs')
-        .insert({
-          playlist_id: playlistId,
-          song_id: songId
-        })
-      
+        .insert({ playlist_id: playlistId, song_id: songId })
+
       if (error) throw error
-      alert("Lagu berhasil ditambahkan ke playlist!")
+
+      useToastStore.getState().showToast('✅ Lagu berhasil ditambahkan ke playlist!', 'success')
       setShowPlaylistMenu(false)
-    } catch {
-      alert("Lagu mungkin sudah ada di playlist ini.")
+    } catch (err) {
+      if (err.code === '23505') {
+        useToastStore.getState().showToast('Lagu sudah ada di playlist ini', 'info')
+      } else {
+        useToastStore.getState().showToast('Gagal menambahkan ke playlist', 'error')
+      }
     }
   }
 

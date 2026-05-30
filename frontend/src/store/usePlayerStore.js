@@ -317,31 +317,103 @@ function stopYtProgressTimer() {
   }
 }
 
+// ================================================================
+// HELPER TERPUSAT: Dapatkan atau buat UUID lagu di Supabase DB
+// Mengembalikan UUID (36 char) jika berhasil, atau null jika gagal.
+// Menyimpan metadata termasuk genre agar rekomendasi berbasis genre akurat.
+// ================================================================
+async function getOrCreateDbSongId(song) {
+  if (!song) return null
+
+  // Jika sudah UUID Supabase
+  if (song.id && song.id.length === 36) return song.id
+
+  // Tentukan video_id untuk lagu YouTube
+  const videoId = song.video_id || song.videoId || (song.id && song.id.length === 11 ? song.id : null)
+  if (!videoId) return null
+
+  try {
+    // Cek apakah sudah ada di DB
+    const { data: existing } = await supabase
+      .from('songs')
+      .select('id, genre')
+      .eq('video_id', videoId)
+      .maybeSingle()
+
+    if (existing) {
+      // Update genre jika sekarang ada tapi sebelumnya kosong
+      if (!existing.genre && song.genre) {
+        await supabase.from('songs').update({ genre: song.genre }).eq('id', existing.id)
+      }
+      return existing.id
+    }
+
+    // Belum ada → insert baru dengan metadata lengkap
+    const { data: newSong, error } = await supabase
+      .from('songs')
+      .insert({
+        title: song.title || 'Unknown',
+        artist: song.artist || 'Unknown Artist',
+        cover_url: song.coverUrl || song.cover_url || null,
+        video_id: videoId,
+        genre: song.genre || null,
+        is_youtube: true,
+        status: 'public'
+      })
+      .select('id')
+      .single()
+
+    if (error) {
+      console.warn('getOrCreateDbSongId insert error:', error.message)
+      return null
+    }
+    return newSong?.id || null
+  } catch (err) {
+    console.warn('getOrCreateDbSongId failed:', err)
+    return null
+  }
+}
+
+// ================================================================
 // Mengambil beberapa lagu rekomendasi sekaligus untuk autoplay berkelanjutan
+// Selalu mengutamakan genre lagu yang sedang diputar
+// ================================================================
 async function fetchRecommendedSongs(currentSong, currentQueue, count = 5) {
   const results = []
 
+  // Tentukan genre dari lagu yang sedang diputar
+  // Jika YouTube song dan belum ada genre, coba ambil dari DB
+  let targetGenre = currentSong?.genre || null
+  if (!targetGenre && currentSong) {
+    const videoId = currentSong.video_id || currentSong.videoId || (currentSong.id?.length === 11 ? currentSong.id : null)
+    if (videoId) {
+      try {
+        const { data } = await supabase.from('songs').select('genre').eq('video_id', videoId).maybeSingle()
+        if (data?.genre) targetGenre = data.genre
+      } catch {}
+    }
+  }
+
   try {
-    // Kumpulkan semua ID yang sudah ada di antrean (hanya UUID 36-char untuk Supabase)
+    // Kumpulkan semua UUID yang sudah ada di antrean (hanya 36-char UUID)
     const validUuidIds = currentQueue
       .map(s => s.id)
       .filter(id => id && id.length === 36)
 
-    // === PRIORITAS 1: Cari lagu dari genre yang sama di Supabase ===
-    if (currentSong && currentSong.genre) {
+    // === PRIORITAS 1: Cari lagu dari genre yang SAMA di Supabase ===
+    if (targetGenre) {
       let genreQuery = supabase
         .from('songs')
         .select('*')
         .eq('status', 'public')
-        .eq('genre', currentSong.genre)
+        .eq('genre', targetGenre)
 
       if (validUuidIds.length > 0) {
         genreQuery = genreQuery.not('id', 'in', `(${validUuidIds.join(',')})`)
       }
 
-      const { data: genreData } = await genreQuery.limit(count * 2)
+      const { data: genreData } = await genreQuery.limit(count * 3)
       if (genreData && genreData.length > 0) {
-        // Acak urutan
         const shuffled = [...genreData].sort(() => Math.random() - 0.5)
         results.push(...shuffled.slice(0, count))
       }
@@ -384,29 +456,36 @@ async function fetchRecommendedSongs(currentSong, currentQueue, count = 5) {
       }
     }
 
-    // === PRIORITAS 4: Fallback ke YouTube Search via music service ===
+    // === PRIORITAS 4: YouTube Search — gunakan genre sebagai query agar relevan ===
     if (results.length === 0) {
-      const searchQuery = currentSong
-        ? `${currentSong.artist || ''} ${currentSong.genre || 'music'}`.trim()
-        : 'popular music'
+      // Prioritas: genre → artis+genre → musik populer
+      const genreQuery = targetGenre || (currentSong?.genre) || null
+      const artistQuery = currentSong?.artist || ''
+      const searchQuery = genreQuery
+        ? (artistQuery ? `${artistQuery} ${genreQuery}` : `${genreQuery} music`)
+        : (artistQuery ? `${artistQuery} similar` : 'popular music')
 
       try {
         const res = await fetch(
-          `${MUSIC_SERVICE_URL}/search?q=${encodeURIComponent(searchQuery)}&limit=${count}`
+          `${MUSIC_SERVICE_URL}/search?q=${encodeURIComponent(searchQuery)}&limit=${count * 2}`
         )
         if (res.ok) {
           const ytResults = await res.json()
-          const ytSongs = (ytResults.results || ytResults || []).slice(0, count).map(s => ({
-            id: s.videoId || s.video_id || s.id,
-            title: s.title,
-            artist: s.artist || s.channel || 'YouTube Music',
-            cover_url: s.coverUrl || s.thumbnail || s.cover_url,
-            coverUrl: s.coverUrl || s.thumbnail || s.cover_url,
-            video_id: s.videoId || s.video_id || s.id,
-            videoId: s.videoId || s.video_id || s.id,
-            is_youtube: true
-          }))
-          results.push(...ytSongs.filter(s => s.id))
+          const ytSongs = (ytResults.results || ytResults || [])
+            .filter(s => s.id || s.videoId)
+            .slice(0, count)
+            .map(s => ({
+              id: s.videoId || s.video_id || s.id,
+              title: s.title,
+              artist: s.artist || s.channel || 'YouTube Music',
+              cover_url: s.coverUrl || s.thumbnail || s.cover_url,
+              coverUrl: s.coverUrl || s.thumbnail || s.cover_url,
+              video_id: s.videoId || s.video_id || s.id,
+              videoId: s.videoId || s.video_id || s.id,
+              genre: genreQuery || null, // simpan genre agar riwayat + statistik akurat
+              is_youtube: true
+            }))
+          results.push(...ytSongs)
         }
       } catch (ytErr) {
         console.warn('YouTube search fallback failed:', ytErr)
@@ -420,7 +499,7 @@ async function fetchRecommendedSongs(currentSong, currentQueue, count = 5) {
   return results
 }
 
-// Kompatibel ke belakang - mengembalikan satu lagu saja (digunakan di tempat lain)
+// Kompatibel ke belakang - mengembalikan satu lagu saja
 async function fetchRecommendedSong(currentSong, currentQueue) {
   const songs = await fetchRecommendedSongs(currentSong, currentQueue, 5)
   return songs.length > 0 ? songs[0] : null
@@ -658,55 +737,19 @@ export const usePlayerStore = create((set, get) => {
       if (!user) return
 
       try {
-        let songId = song.id
-        const isYoutube = !!(
-          song.is_youtube || 
-          (song.videoId && song.videoId.length === 11) || 
-          (song.video_id && song.video_id.length === 11) || 
-          (song.id && song.id.length === 11)
-        )
+        // Dapatkan UUID Supabase — termasuk membuat record baru jika YouTube song belum ada di DB
+        const songId = await getOrCreateDbSongId(song)
 
-        if (isYoutube) {
-          const videoId = song.video_id || song.videoId || song.id
-          
-          // Check if song exists in DB
-          const { data: existingSong } = await supabase
-            .from('songs')
-            .select('id')
-            .eq('video_id', videoId)
-            .maybeSingle()
-
-          if (existingSong) {
-            songId = existingSong.id
-          } else {
-            // Insert YouTube song metadata to songs table first
-            const { data: newSong } = await supabase
-              .from('songs')
-              .insert({
-                title: song.title,
-                artist: song.artist,
-                cover_url: song.coverUrl || song.cover_url,
-                video_id: videoId,
-                is_youtube: true,
-                status: 'public'
-              })
-              .select()
-              .single()
-            songId = newSong.id
-          }
+        if (!songId) {
+          console.warn('saveToPlayHistory: gagal mendapatkan songId untuk', song.title)
+          return
         }
 
-        // Insert into play_history
-        if (songId && songId.length === 36) {
-          await supabase
-            .from('play_history')
-            .insert({
-              user_id: user.id,
-              song_id: songId
-            })
-        }
+        await supabase
+          .from('play_history')
+          .insert({ user_id: user.id, song_id: songId })
       } catch (err) {
-        console.warn("Gagal mencatat riwayat pemutaran ke database:", err)
+        console.warn('Gagal mencatat riwayat pemutaran:', err.message || err)
       }
     },
 

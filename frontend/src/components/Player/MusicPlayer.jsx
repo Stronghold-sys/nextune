@@ -93,7 +93,8 @@ export default function MusicPlayer() {
           video_id: videoId,
           genre: song.genre || null,
           is_youtube: true,
-          status: 'public'
+          status: 'public',
+          created_by: user ? user.id : null
         })
         .select('id')
         .single()

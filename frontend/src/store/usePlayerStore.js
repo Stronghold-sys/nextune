@@ -683,53 +683,92 @@ export const usePlayerStore = create((set, get) => {
           }
           audioUrl = data.streamUrl
         } catch (error) {
-          console.warn("YouTube play error (attempting client-side fallback):", error)
+          console.warn("YouTube play error (attempting client-side Piped fallback):", error)
           
-          if (!videoId) {
-            console.error("YouTube videoId is missing for YouTube song:", song)
-            set({ isPlaying: false, loadingStream: false, currentYoutubeVideoId: null })
-            alert("Video ID tidak ditemukan untuk lagu ini.")
-            return
-          }
-          
-          if (ytPlayer && isYtReady) {
-            try {
-              // Pause and clear global HTML5 audio player
-              globalAudio.pause()
-              globalAudio.src = ""
-              
-              // Load and play video in YouTube player
-              if (typeof ytPlayer.loadVideoById === 'function') {
-                ytPlayer.loadVideoById({
-                  videoId: videoId,
-                  startSeconds: seekTime || 0
+          if (videoId) {
+            // Attempt client-side extraction from Piped instances directly (uses user's IP, avoiding backend blocks)
+            const PIPED_INSTANCES = [
+              'https://pipedapi.kavin.rocks',
+              'https://api.piped.yt',
+              'https://piped-api.garudalinux.org',
+              'https://api.piped.projectsegfau.lt',
+            ]
+            
+            for (const instance of PIPED_INSTANCES) {
+              try {
+                const controller = new AbortController()
+                const timeoutId = setTimeout(() => controller.abort(), 4000)
+                const pipedRes = await fetch(`${instance}/streams/${videoId}`, {
+                  signal: controller.signal
                 })
-              } else {
-                ytPlayer.cueVideoById({ videoId, startSeconds: seekTime || 0 })
-                ytPlayer.playVideo()
+                clearTimeout(timeoutId)
+                
+                if (pipedRes.ok) {
+                  const pipedData = await pipedRes.json()
+                  const audioStreams = pipedData.audioStreams || []
+                  const bestStream = audioStreams
+                    .filter(s => s.url && (s.mimeType?.includes('audio') || s.codec?.includes('opus') || s.codec?.includes('aac')))
+                    .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0]
+                  
+                  if (bestStream?.url) {
+                    audioUrl = bestStream.url
+                    console.log(`Stream extracted client-side via Piped instance: ${instance}`)
+                    break
+                  }
+                }
+              } catch (pipedErr) {
+                console.warn(`Client-side Piped instance ${instance} failed:`, pipedErr)
               }
-              
-              // Apply volume and playback settings
-              ytPlayer.setVolume(get().volume * 100)
-              if (typeof ytPlayer.setPlaybackRate === 'function') {
-                ytPlayer.setPlaybackRate(get().playbackSpeed)
-              }
-              
-              set({ activePlayer: 'youtube', currentYoutubeVideoId: videoId, loadingStream: false, isPlaying: true })
-              get().saveToPlayHistory(song)
-              get().loadLyrics(song)
-              return
-            } catch (ytErr) {
-              console.error("YouTube Player fallback failed:", ytErr)
             }
           }
-          
-          set({ isPlaying: false, loadingStream: false, currentYoutubeVideoId: null })
-          const msg = error.message?.includes('bot') || error.message?.includes('Sign in')
-            ? 'Lagu tidak dapat diputar saat ini karena deteksi bot YouTube. Coba lagi sebentar atau pilih lagu lain.'
-            : 'Gagal memutar lagu. Silakan coba lagi.'
-          alert(msg)
-          return
+
+          if (!audioUrl) {
+            if (!videoId) {
+              console.error("YouTube videoId is missing for YouTube song:", song)
+              set({ isPlaying: false, loadingStream: false, currentYoutubeVideoId: null })
+              alert("Video ID tidak ditemukan untuk lagu ini.")
+              return
+            }
+            
+            if (ytPlayer && isYtReady) {
+              try {
+                // Pause and clear global HTML5 audio player
+                globalAudio.pause()
+                globalAudio.src = ""
+                
+                // Load and play video in YouTube player
+                if (typeof ytPlayer.loadVideoById === 'function') {
+                  ytPlayer.loadVideoById({
+                    videoId: videoId,
+                    startSeconds: seekTime || 0
+                  })
+                } else {
+                  ytPlayer.cueVideoById({ videoId, startSeconds: seekTime || 0 })
+                  ytPlayer.playVideo()
+                }
+                
+                // Apply volume and playback settings
+                ytPlayer.setVolume(get().volume * 100)
+                if (typeof ytPlayer.setPlaybackRate === 'function') {
+                  ytPlayer.setPlaybackRate(get().playbackSpeed)
+                }
+                
+                set({ activePlayer: 'youtube', currentYoutubeVideoId: videoId, loadingStream: false, isPlaying: true })
+                get().saveToPlayHistory(song)
+                get().loadLyrics(song)
+                return
+              } catch (ytErr) {
+                console.error("YouTube Player fallback failed:", ytErr)
+              }
+            }
+            
+            set({ isPlaying: false, loadingStream: false, currentYoutubeVideoId: null })
+            const msg = error.message?.includes('bot') || error.message?.includes('Sign in')
+              ? 'Lagu tidak dapat diputar saat ini karena deteksi bot YouTube. Coba lagi sebentar atau pilih lagu lain.'
+              : 'Gagal memutar lagu. Silakan coba lagi.'
+            alert(msg)
+            return
+          }
         }
       } else {
         set({ activePlayer: 'audio', currentYoutubeVideoId: null })

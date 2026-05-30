@@ -130,9 +130,68 @@ app.get("/song/:videoId", async (req, res) => {
   }
 });
 
+async function handleGetAlbum(albumId) {
+  const albumInfo = await ytmusic.getAlbum(albumId);
+  const tracks = (albumInfo.songs || []).map((track) => {
+    const coverUrl =
+      track.thumbnails && track.thumbnails.length > 0
+        ? track.thumbnails[track.thumbnails.length - 1].url
+        : "";
+
+    return {
+      id: track.videoId,
+      title: track.name || "Unknown",
+      artist: track.artist ? track.artist.name : "Unknown Artist",
+      album: albumInfo.name,
+      coverUrl,
+      duration: track.duration ? formatDuration(track.duration) : "",
+      durationSeconds: track.duration || 0,
+    };
+  });
+
+  const coverUrl =
+    albumInfo.thumbnails && albumInfo.thumbnails.length > 0
+      ? albumInfo.thumbnails[albumInfo.thumbnails.length - 1].url
+      : tracks.length > 0
+      ? tracks[0].coverUrl
+      : "";
+
+  return {
+    id: albumId,
+    title: albumInfo.name || "Album",
+    description: `Album oleh ${albumInfo.artist?.name || 'Unknown Artist'} (${albumInfo.year || ''})`,
+    coverUrl,
+    tracks,
+    trackCount: tracks.length,
+  };
+}
+
+// GET /album/{albumId}
+app.get("/album/:albumId", async (req, res) => {
+  const { albumId } = req.params;
+  try {
+    const albumData = await handleGetAlbum(albumId);
+    res.json(albumData);
+  } catch (error) {
+    console.error("Get album error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // GET /playlist/{playlistId}
 app.get("/playlist/:playlistId", async (req, res) => {
   const { playlistId } = req.params;
+
+  // Support album IDs in playlist endpoint
+  if (playlistId.startsWith("MPREb_") || playlistId.startsWith("FNDis_MPREb_")) {
+    try {
+      const albumData = await handleGetAlbum(playlistId);
+      return res.json(albumData);
+    } catch (albumErr) {
+      console.warn("Detected album ID but getAlbum failed, falling back to playlist:", albumErr.message);
+    }
+  }
+
   try {
     // We try to fetch the playlist metadata first, fallback if it errors (e.g. charts)
     let playlistInfo = {};

@@ -97,8 +97,8 @@ module.exports = async (req, res) => {
 
     const isProd = !merchantCode.startsWith('DS');
     const duitkuUrl = isProd 
-      ? 'https://passport.duitku.com/webapi/api/merchant/paymentinquiry'
-      : 'https://sandbox.duitku.com/webapi/api/merchant/paymentinquiry';
+      ? 'https://passport.duitku.com/webapi/api/merchant/inquiry'
+      : 'https://sandbox.duitku.com/webapi/api/merchant/inquiry';
 
     let reference = null;
     let paymentUrl = null;

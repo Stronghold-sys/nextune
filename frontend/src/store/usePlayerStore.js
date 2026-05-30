@@ -3,8 +3,130 @@ import { useAuthStore } from './useAuthStore'
 
 const MUSIC_SERVICE_URL = import.meta.env.VITE_MUSIC_SERVICE_URL || 'http://localhost:8001'
 
-// Global HTML5 Audio instance for persistence across routes
+// Global HTML5 Audio instance for custom uploads
 let globalAudio = new Audio()
+
+// YouTube Player state holders
+let ytPlayer = null
+let ytProgressInterval = null
+
+// Load YouTube IFrame API
+if (typeof window !== 'undefined') {
+  // Load IFrame Player API script if not loaded
+  if (!window.YT) {
+    const tag = document.createElement('script')
+    tag.src = "https://www.youtube.com/iframe_api"
+    const firstScriptTag = document.getElementsByTagName('script')[0]
+    firstScriptTag.parentNode.insertBefore(tag, firstScriptTag)
+  }
+
+  // Register callback
+  window.onYouTubeIframeAPIReady = () => {
+    initYouTubePlayer()
+  }
+
+  // Check if script is already loaded and ready
+  if (window.YT && window.YT.Player) {
+    setTimeout(initYouTubePlayer, 100)
+  }
+}
+
+function initYouTubePlayer() {
+  if (ytPlayer) return
+
+  let placeholder = document.getElementById('yt-player-placeholder')
+  if (!placeholder) {
+    placeholder = document.createElement('div')
+    placeholder.id = 'yt-player-placeholder'
+    placeholder.style.position = 'absolute'
+    placeholder.style.width = '0px'
+    placeholder.style.height = '0px'
+    placeholder.style.opacity = '0'
+    placeholder.style.pointerEvents = 'none'
+    document.body.appendChild(placeholder)
+  }
+
+  try {
+    ytPlayer = new window.YT.Player('yt-player-placeholder', {
+      height: '0',
+      width: '0',
+      videoId: '',
+      playerVars: {
+        'playsinline': 1,
+        'controls': 0,
+        'disablekb': 1,
+        'fs': 0,
+        'rel': 0,
+        'showinfo': 0,
+        'iv_load_policy': 3
+      },
+      events: {
+        'onStateChange': (event) => {
+          const store = usePlayerStore.getState()
+          if (event.data === window.YT.PlayerState.ENDED) {
+            stopYtProgressTimer()
+            if (store.repeatMode === 'one') {
+              ytPlayer.seekTo(0)
+              ytPlayer.playVideo()
+            } else {
+              store.next()
+            }
+          } else if (event.data === window.YT.PlayerState.PLAYING) {
+            usePlayerStore.setState({ isPlaying: true, loadingStream: false })
+            startYtProgressTimer()
+          } else if (event.data === window.YT.PlayerState.PAUSED) {
+            usePlayerStore.setState({ isPlaying: false })
+            stopYtProgressTimer()
+          } else if (event.data === window.YT.PlayerState.BUFFERING) {
+            usePlayerStore.setState({ loadingStream: true })
+          }
+        },
+        'onError': (e) => {
+          console.error("YouTube Player Error:", e)
+          usePlayerStore.setState({ isPlaying: false, loadingStream: false })
+          alert("Gagal memutar lagu dari YouTube. Silakan coba lagi.")
+        }
+      }
+    })
+  } catch (err) {
+    console.error("Error creating YT.Player:", err)
+  }
+}
+
+function startYtProgressTimer() {
+  if (ytProgressInterval) clearInterval(ytProgressInterval)
+  ytProgressInterval = setInterval(() => {
+    if (!ytPlayer || typeof ytPlayer.getCurrentTime !== 'function') return
+    try {
+      const currentTime = ytPlayer.getCurrentTime()
+      const duration = ytPlayer.getDuration() || 0
+      
+      const profile = useAuthStore.getState().profile
+      const isPremium = profile && (
+        ['admin', 'super_admin', 'content_admin', 'moderation_admin', 'finance_admin'].includes(profile.role) ||
+        (profile.premium_until && new Date(profile.premium_until) > new Date())
+      )
+
+      if (!isPremium && currentTime >= 30) {
+        ytPlayer.pauseVideo()
+        ytPlayer.seekTo(0)
+        usePlayerStore.setState({ isPlaying: false, progress: 0 })
+        window.dispatchEvent(new CustomEvent('premium-required', { detail: { reason: '30s_limit' } }))
+      } else {
+        usePlayerStore.setState({ progress: currentTime, duration })
+      }
+    } catch (e) {
+      console.error("Progress timer error:", e)
+    }
+  }, 250)
+}
+
+function stopYtProgressTimer() {
+  if (ytProgressInterval) {
+    clearInterval(ytProgressInterval)
+    ytProgressInterval = null
+  }
+}
 
 export const usePlayerStore = create((set, get) => {
   // Update state with audio element progress and enforce 30s limit for non-premium
@@ -58,87 +180,115 @@ export const usePlayerStore = create((set, get) => {
     lyrics: [],
     isLyricsSynced: false,
     loadingStream: false,
+    activePlayer: 'audio', // 'audio' | 'youtube'
 
     initAudio: () => {
       globalAudio.volume = get().volume
       globalAudio.playbackRate = get().playbackSpeed
+      initYouTubePlayer()
     },
 
     playSong: async (song, newQueue = null) => {
-      const { isPlaying } = get()
+      const { isPlaying, activePlayer } = get()
       
+      // Stop currently playing
       if (isPlaying) {
-        globalAudio.pause()
+        if (activePlayer === 'audio') {
+          globalAudio.pause()
+        } else if (activePlayer === 'youtube' && ytPlayer && typeof ytPlayer.pauseVideo === 'function') {
+          ytPlayer.pauseVideo()
+        }
       }
+      stopYtProgressTimer()
 
       set({ currentSong: song, progress: 0, duration: 0, loadingStream: true, isPlaying: false })
 
       let audioUrl = song.audioUrl || song.audio_url
+      const isYoutubeSong = song.is_youtube || song.videoId || (song.id && !audioUrl)
 
-      // If it's a YouTube track and doesn't have a direct URL, fetch it from FastAPI
-      if (song.is_youtube || song.videoId || (song.id && !audioUrl)) {
+      // Handle custom queues
+      if (newQueue) {
+        const idx = newQueue.findIndex(s => (s.id || s.videoId) === (song.id || song.videoId))
+        set({ 
+          queue: [...newQueue], 
+          originalQueue: [...newQueue],
+          currentIndex: idx !== -1 ? idx : 0 
+        })
+      }
+
+      if (isYoutubeSong) {
+        set({ activePlayer: 'youtube' })
         const videoId = song.videoId || song.id
+        
         try {
-          const res = await fetch(`${MUSIC_SERVICE_URL}/stream/${videoId}`)
-          if (!res.ok) throw new Error("Gagal mengambil stream URL")
-          const data = await res.json()
-          audioUrl = data.streamUrl
+          if (!ytPlayer || typeof ytPlayer.loadVideoById !== 'function') {
+            initYouTubePlayer()
+            console.log("YouTube player not initialized, trying to wait...")
+            await new Promise(resolve => setTimeout(resolve, 1000))
+            if (!ytPlayer || typeof ytPlayer.loadVideoById !== 'function') {
+              throw new Error("YouTube IFrame Player tidak tersedia.")
+            }
+          }
+          
+          ytPlayer.setVolume(get().volume * 100)
+          ytPlayer.setPlaybackRate(get().playbackSpeed)
+          ytPlayer.loadVideoById(videoId)
+          ytPlayer.playVideo()
+          
+          get().loadLyrics(song)
         } catch (error) {
-          console.error("Error fetching stream:", error)
+          console.error("YouTube play error:", error)
+          set({ isPlaying: false, loadingStream: false })
+          alert("Gagal memutar lagu dari YouTube. Harap coba lagi.")
+        }
+      } else {
+        set({ activePlayer: 'audio' })
+        if (!audioUrl) {
           set({ loadingStream: false })
-          alert("Gagal memutar lagu dari YouTube Music.")
+          alert("Audio URL tidak valid.")
           return
         }
-      }
 
-      if (!audioUrl) {
-        set({ loadingStream: false })
-        alert("Audio URL tidak valid.")
-        return
-      }
-
-      try {
-        globalAudio.src = audioUrl
-        globalAudio.load()
-        globalAudio.volume = get().volume
-        globalAudio.playbackRate = get().playbackSpeed
-        
-        // Handle custom queues
-        if (newQueue) {
-          const idx = newQueue.findIndex(s => (s.id || s.videoId) === (song.id || song.videoId))
-          set({ 
-            queue: [...newQueue], 
-            originalQueue: [...newQueue],
-            currentIndex: idx !== -1 ? idx : 0 
-          })
+        try {
+          globalAudio.src = audioUrl
+          globalAudio.load()
+          globalAudio.volume = get().volume
+          globalAudio.playbackRate = get().playbackSpeed
+          
+          await globalAudio.play()
+          set({ isPlaying: true, loadingStream: false })
+          
+          get().loadLyrics(song)
+        } catch (error) {
+          console.error("Audio play error:", error)
+          set({ isPlaying: false, loadingStream: false })
         }
-
-        await globalAudio.play()
-        set({ isPlaying: true, loadingStream: false })
-        
-        // Load lyrics
-        get().loadLyrics(song)
-      } catch (error) {
-        console.error("Playback play error:", error)
-        set({ isPlaying: false, loadingStream: false })
       }
     },
 
     togglePlay: () => {
-      const { isPlaying, currentSong } = get()
+      const { isPlaying, currentSong, activePlayer } = get()
       if (!currentSong) return
 
       if (isPlaying) {
-        globalAudio.pause()
+        if (activePlayer === 'audio') {
+          globalAudio.pause()
+        } else if (activePlayer === 'youtube' && ytPlayer && typeof ytPlayer.pauseVideo === 'function') {
+          ytPlayer.pauseVideo()
+        }
         set({ isPlaying: false })
       } else {
-        globalAudio.play().catch(err => console.log("Playback toggle error:", err))
+        if (activePlayer === 'audio') {
+          globalAudio.play().catch(err => console.log("Audio toggle error:", err))
+        } else if (activePlayer === 'youtube' && ytPlayer && typeof ytPlayer.playVideo === 'function') {
+          ytPlayer.playVideo()
+        }
         set({ isPlaying: true })
       }
     },
 
     next: () => {
-      const { queue, currentIndex, repeatMode } = get()
+      const { queue, currentIndex, repeatMode, activePlayer } = get()
       if (queue.length === 0) return
 
       let nextIndex = currentIndex + 1
@@ -147,7 +297,11 @@ export const usePlayerStore = create((set, get) => {
           nextIndex = 0
         } else {
           // stop playing
-          globalAudio.pause()
+          if (activePlayer === 'audio') {
+            globalAudio.pause()
+          } else if (activePlayer === 'youtube' && ytPlayer && typeof ytPlayer.pauseVideo === 'function') {
+            ytPlayer.pauseVideo()
+          }
           set({ isPlaying: false, progress: 0 })
           return
         }
@@ -158,12 +312,16 @@ export const usePlayerStore = create((set, get) => {
     },
 
     prev: () => {
-      const { queue, currentIndex, progress } = get()
+      const { queue, currentIndex, progress, activePlayer } = get()
       if (queue.length === 0) return
 
       // If playing has progressed past 3s, restart song
       if (progress > 3) {
-        globalAudio.currentTime = 0
+        if (activePlayer === 'audio') {
+          globalAudio.currentTime = 0
+        } else if (activePlayer === 'youtube' && ytPlayer && typeof ytPlayer.seekTo === 'function') {
+          ytPlayer.seekTo(0, true)
+        }
         set({ progress: 0 })
         return
       }
@@ -178,28 +336,44 @@ export const usePlayerStore = create((set, get) => {
     },
 
     seek: (time) => {
+      const { activePlayer } = get()
       const profile = useAuthStore.getState().profile
       const isPremium = profile && (
         ['admin', 'super_admin', 'content_admin', 'moderation_admin', 'finance_admin'].includes(profile.role) ||
         (profile.premium_until && new Date(profile.premium_until) > new Date())
       )
       if (!isPremium && time >= 30) {
-        globalAudio.currentTime = 29.9
+        if (activePlayer === 'audio') {
+          globalAudio.currentTime = 29.9
+        } else if (activePlayer === 'youtube' && ytPlayer && typeof ytPlayer.seekTo === 'function') {
+          ytPlayer.seekTo(29.9, true)
+        }
         set({ progress: 29.9 })
         window.dispatchEvent(new CustomEvent('premium-required', { detail: { reason: '30s_limit' } }))
         return
       }
-      globalAudio.currentTime = time
+
+      if (activePlayer === 'audio') {
+        globalAudio.currentTime = time
+      } else if (activePlayer === 'youtube' && ytPlayer && typeof ytPlayer.seekTo === 'function') {
+        ytPlayer.seekTo(time, true)
+      }
       set({ progress: time })
     },
 
     setVolume: (vol) => {
+      const { activePlayer } = get()
       const v = Math.max(0, Math.min(1, vol))
-      globalAudio.volume = v
+      if (activePlayer === 'audio') {
+        globalAudio.volume = v
+      } else if (activePlayer === 'youtube' && ytPlayer && typeof ytPlayer.setVolume === 'function') {
+        ytPlayer.setVolume(v * 100)
+      }
       set({ volume: v })
     },
 
     setPlaybackSpeed: (speed) => {
+      const { activePlayer } = get()
       if (speed !== 1) {
         const profile = useAuthStore.getState().profile
         const isPremium = profile && (
@@ -211,7 +385,11 @@ export const usePlayerStore = create((set, get) => {
           return
         }
       }
-      globalAudio.playbackRate = speed
+      if (activePlayer === 'audio') {
+        globalAudio.playbackRate = speed
+      } else if (activePlayer === 'youtube' && ytPlayer && typeof ytPlayer.setPlaybackRate === 'function') {
+        ytPlayer.setPlaybackRate(speed)
+      }
       set({ playbackSpeed: speed })
     },
 
@@ -250,7 +428,6 @@ export const usePlayerStore = create((set, get) => {
 
     addToQueue: (song) => {
       const { queue } = get()
-      // Check if song already in queue
       const exists = queue.some(s => (s.id || s.videoId) === (song.id || song.videoId))
       if (exists) return
 
@@ -307,19 +484,14 @@ export const usePlayerStore = create((set, get) => {
         if (sleepTimer <= 1) {
           clearInterval(sleepInterval)
           set({ sleepTimer: null })
-          // Stop music
           togglePlay()
         } else {
           set({ sleepTimer: sleepTimer - 1 })
         }
-      }, 60000) // update each minute
+      }, 60000)
     },
 
     loadLyrics: async (song) => {
-      // Setup demo synchronized lyrics or fetch if available
-      // Synced lyrics format: { time: seconds, text: string }
-      // We will provide default mock synchronized lyrics based on duration
-      // or plain text lyrics to support the lirik feature fully
       const title = song.title || "Lagu"
       const artist = song.artist || "Artis"
       

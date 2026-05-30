@@ -329,22 +329,77 @@ app.get("/home", async (req, res) => {
 // GET /stream/{videoId}
 app.get("/stream/:videoId", async (req, res) => {
   const { videoId } = req.params;
+
+  // Strategy 1: Try multiple Piped API instances (no bot detection, fast, no auth required)
+  const PIPED_INSTANCES = [
+    'https://pipedapi.kavin.rocks',
+    'https://api.piped.yt',
+    'https://piped-api.garudalinux.org',
+    'https://api.piped.projectsegfau.lt',
+  ];
+
+  for (const instance of PIPED_INSTANCES) {
+    try {
+      const pipedRes = await fetch(`${instance}/streams/${videoId}`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        },
+        signal: AbortSignal.timeout(5000)
+      });
+      
+      if (!pipedRes.ok) continue;
+      
+      const pipedData = await pipedRes.json();
+      
+      // Piped returns audioStreams array
+      const audioStreams = pipedData.audioStreams || [];
+      // Pick the best quality audio stream (prefer opus/m4a, highest bitrate)
+      const bestStream = audioStreams
+        .filter(s => s.url && (s.mimeType?.includes('audio') || s.codec?.includes('opus') || s.codec?.includes('aac')))
+        .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
+      
+      if (bestStream?.url) {
+        console.log(`Stream extracted via Piped instance: ${instance}`);
+        return res.json({ streamUrl: bestStream.url, source: 'piped' });
+      }
+    } catch (pipedErr) {
+      console.warn(`Piped instance ${instance} failed:`, pipedErr.message);
+    }
+  }
+
+  // Strategy 2: Try play-dl
   try {
     const stream = await play.stream("https://www.youtube.com/watch?v=" + videoId);
-    res.json({ streamUrl: stream.url });
-  } catch (error) {
-    console.error("Stream extraction error:", error);
-    
-    // As a robust fallback, try executing python yt-dlp module in case pip version is newer or has cookies
-    const { exec } = require("child_process");
-    exec(`python -c "import yt_dlp; ydl = yt_dlp.YoutubeDL({'format': 'bestaudio', 'quiet': True}); info = ydl.extract_info('https://www.youtube.com/watch?v=${videoId}', download=False); print(info.get('url'))"`, (err, stdout, stderr) => {
-      if (err || !stdout.trim()) {
-        console.error("Python stream fallback extraction failed:", stderr || err);
-        return res.status(500).json({ error: "Failed to extract stream: " + error.message });
-      }
-      res.json({ streamUrl: stdout.trim() });
-    });
+    if (stream?.url) {
+      console.log('Stream extracted via play-dl');
+      return res.json({ streamUrl: stream.url, source: 'play-dl' });
+    }
+  } catch (playDlErr) {
+    console.warn("play-dl failed:", playDlErr.message);
   }
+
+  // Strategy 3: yt-dlp via Python (best bot evasion but slower)
+  const { exec } = require("child_process");
+  const ytDlpCmd = `yt-dlp --no-warnings -f "bestaudio[ext=m4a]/bestaudio/best" --get-url "https://www.youtube.com/watch?v=${videoId}"`;
+  
+  exec(ytDlpCmd, { timeout: 30000 }, (err, stdout, stderr) => {
+    if (!err && stdout.trim()) {
+      console.log('Stream extracted via yt-dlp');
+      return res.json({ streamUrl: stdout.trim().split('\n')[0], source: 'yt-dlp' });
+    }
+    
+    // Strategy 4: yt-dlp via Python module
+    const pyCmd = `python -c "import yt_dlp; opts={'format':'bestaudio','quiet':True,'no_warnings':True}; ydl=yt_dlp.YoutubeDL(opts); info=ydl.extract_info('https://www.youtube.com/watch?v=${videoId}',download=False); print(info.get('url',''))"`;
+    exec(pyCmd, { timeout: 30000 }, (pyErr, pyStdout) => {
+      if (!pyErr && pyStdout.trim()) {
+        console.log('Stream extracted via Python yt-dlp');
+        return res.json({ streamUrl: pyStdout.trim(), source: 'python-yt-dlp' });
+      }
+      
+      console.error("All stream extraction strategies failed for:", videoId);
+      return res.status(500).json({ error: "Gagal mengekstrak URL audio. YouTube mungkin memblokir permintaan ini. Coba lagi nanti." });
+    });
+  });
 });
 
 // Payment Gateway & Voucher Routes

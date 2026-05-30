@@ -15,10 +15,10 @@ module.exports = async (req, res) => {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { userId, packageId, paymentMethod, email } = req.body;
+  const { userId, packageId, email } = req.body;
 
-  if (!userId || !packageId || !paymentMethod) {
-    return res.status(400).json({ error: 'Parameters userId, packageId, and paymentMethod are required' });
+  if (!userId || !packageId) {
+    return res.status(400).json({ error: 'Parameters userId and packageId are required' });
   }
 
   try {
@@ -51,44 +51,42 @@ module.exports = async (req, res) => {
     // 2. Generate unique merchantOrderId
     const merchantOrderId = 'INV-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
 
-    // Duitku credentials (default sandbox)
+    // Duitku credentials (Sandbox)
     const merchantCode = process.env.DUITKU_MERCHANT_CODE || 'DS31208';
     const apiKey = process.env.DUITKU_API_KEY || 'a9944612d52835f796f330f6b40e25fa';
     
-    // 3. Compute Inquiry signature (v2)
-    // Signature = SHA256(merchantCode + merchantOrderId + paymentAmount + apiKey)
+    // 3. Compute Inquiry signature
+    // Signature = MD5(merchantCode + merchantOrderId + paymentAmount + apiKey)
     const payloadStr = merchantCode + merchantOrderId + price.toString() + apiKey;
-    const signature = crypto.createHash('sha256').update(payloadStr).digest('hex');
+    const signature = crypto.createHash('md5').update(payloadStr).digest('hex');
 
     // 4. Create pending transaction in Supabase
-    const { data: tx, error: txErr } = await supabase
+    await supabase
       .from('transactions')
       .insert({
         user_id: userId,
         package_id: (packageId && !packageId.startsWith('mock-')) ? packageId : null,
         amount: price,
         status: 'pending',
-        payment_method: paymentMethod,
-      })
-      .select()
-      .single();
+        payment_method: 'duitku_pop',
+        merchant_order_id: merchantOrderId,
+      });
 
-    // 5. Call Duitku API Sandbox
+    // 5. Call Duitku Sandbox API - Pop inquiry endpoint
     const callbackUrl = `${process.env.MUSIC_SERVICE_URL || 'https://nextune-psi.vercel.app'}/api/payment/callback`;
-    const returnUrl = 'https://nextune.my.id';
+    const returnUrl = process.env.FRONTEND_URL || 'https://nextune.my.id';
 
-    const duitkuBody = {
+    const duitkuPayload = {
       merchantCode,
       paymentAmount: price,
       merchantOrderId,
       productDetails: packageName,
-      additionalParam: userId, // Pass user ID as additional param to activate user
+      additionalParam: userId, // Pass user ID to activate premium after payment
       callbackUrl,
       returnUrl,
       signature,
       expiryPeriod: 1440, // 24 hours
       email: email || 'customer@nextune.my.id',
-      paymentMethod,
       customerDetail: {
         firstName: 'Customer',
         lastName: 'NexTune',
@@ -97,51 +95,45 @@ module.exports = async (req, res) => {
       }
     };
 
-    let responseData = null;
+    let reference = null;
+    let paymentUrl = null;
+
     try {
-      const response = await fetch('https://sandbox.duitku.com/webapi/api/merchant/v2/inquiry', {
+      const duitkuResp = await fetch('https://sandbox.duitku.com/webapi/api/merchant/v2/inquiry', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(duitkuBody)
+        body: JSON.stringify(duitkuPayload)
       });
-      responseData = await response.json();
+      const duitkuData = await duitkuResp.json();
+
+      console.log('Duitku response:', JSON.stringify(duitkuData));
+
+      if (duitkuData && (duitkuData.statusCode === '00' || duitkuData.reference)) {
+        reference = duitkuData.reference;
+        paymentUrl = duitkuData.paymentUrl;
+      } else {
+        console.warn('Duitku inquiry returned non-success:', duitkuData);
+      }
     } catch (duitkuErr) {
-      console.warn("Duitku Sandbox API failed, falling back to simulated payload:", duitkuErr);
+      console.warn('Duitku Sandbox API call failed:', duitkuErr.message);
     }
 
-    // 6. Handle Duitku response
-    if (responseData && responseData.statusCode === '00') {
-      return res.status(200).json({
-        success: true,
-        merchantOrderId,
-        amount: price,
-        paymentUrl: responseData.paymentUrl,
-        vaNumber: responseData.vaNumber || '1234567890123456',
-        qrCode: responseData.qrCode || '00020101021126570014ID.CO.QRIS.WWW01189360099900000000000215000101234567890303UME5204599953033605802ID5915NEXTUNE STREAMING6007JAKARTA61051234563045E1B',
-        reference: responseData.reference,
-        packageName,
-        durationDays
-      });
-    } else {
-      // Return a simulated success response for sandbox testing so that integration always works
-      // Generates a mock QRIS or VA code
-      const mockVa = '8832' + Math.floor(100000000000 + Math.random() * 900000000000);
-      const mockQr = '00020101021126570014ID.CO.QRIS.WWW01189360099900000000000215000101234567890303UME5204599953033605802ID5915NEXTUNE STREAMING6007JAKARTA61051234563045E1B';
-      
-      return res.status(200).json({
-        success: true,
-        merchantOrderId,
-        amount: price,
-        paymentUrl: `https://sandbox.duitku.com/webapi/payment/simulated?orderId=${merchantOrderId}`,
-        vaNumber: mockVa,
-        qrCode: mockQr,
-        reference: 'REF-SIM-' + merchantOrderId,
-        packageName,
-        durationDays
-      });
-    }
+    // 6. Return response to frontend
+    // If we got a real reference, frontend will use checkout.process(reference, ...)
+    // If not (API failed), we still return what we have so frontend can show a fallback
+    return res.status(200).json({
+      success: true,
+      merchantOrderId,
+      amount: price,
+      reference: reference || ('REF-LOCAL-' + merchantOrderId),
+      paymentUrl: paymentUrl || null,
+      packageName,
+      durationDays,
+      isSandboxFallback: !reference // flag so frontend knows if real or fallback
+    });
+
   } catch (err) {
     console.error('Create transaction error:', err);
     res.status(500).json({ error: err.message });

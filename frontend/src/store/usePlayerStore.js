@@ -322,7 +322,10 @@ export const usePlayerStore = create((set, get) => {
         } catch (error) {
           console.error("YouTube play error:", error)
           set({ isPlaying: false, loadingStream: false })
-          alert("Gagal memutar lagu dari YouTube: " + error.message)
+          const msg = error.message?.includes('bot') || error.message?.includes('Sign in')
+            ? 'Lagu tidak dapat diputar saat ini karena deteksi bot YouTube. Coba lagi sebentar atau pilih lagu lain.'
+            : 'Gagal memutar lagu. Silakan coba lagi.'
+          alert(msg)
           return
         }
       } else {

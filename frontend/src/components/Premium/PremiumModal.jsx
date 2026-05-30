@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { Crown, Check, CreditCard, X, QrCode, Loader, Sparkles, Ticket } from 'lucide-react'
+import { Crown, Check, Loader, Sparkles, Ticket, X } from 'lucide-react'
 import { supabase } from '../../supabaseClient'
 import { useAuthStore } from '../../store/useAuthStore'
 
@@ -13,19 +13,15 @@ export default function PremiumModal({ isOpen, onClose }) {
   const [loadingPackages, setLoadingPackages] = useState(true)
   const [selectedPkg, setSelectedPkg] = useState(null)
   
-  const [paymentStep, setPaymentStep] = useState('select_package') // 'select_package' | 'select_payment' | 'duitku_checkout' | 'processing' | 'success'
-  const [selectedPayment, setSelectedPayment] = useState(null)
+  const [paymentStep, setPaymentStep] = useState('select_package')
+  // 'select_package' | 'processing' | 'waiting' | 'success'
 
   // Voucher states
   const [voucherCode, setVoucherCode] = useState('')
   const [redeemingVoucher, setRedeemingVoucher] = useState(false)
   const [voucherError, setVoucherError] = useState('')
 
-  // Duitku Inquiry Response states
-  const [duitkuTx, setDuitkuTx] = useState(null)
-  const [simulatingCallback, setSimulatingCallback] = useState(false)
-
-  // Seed default packages if database is empty
+  // Load packages on open
   useEffect(() => {
     if (!isOpen) return
 
@@ -41,7 +37,6 @@ export default function PremiumModal({ isOpen, onClose }) {
         if (error) throw error
 
         if (!pkgs || pkgs.length === 0) {
-          // Seed default packages
           const defaultPkgs = [
             { 
               name: 'Bulanan Premium', 
@@ -58,35 +53,20 @@ export default function PremiumModal({ isOpen, onClose }) {
               is_active: true 
             }
           ]
-
           const { data: seeded, error: seedError } = await supabase
             .from('premium_packages')
             .insert(defaultPkgs)
             .select()
-
           if (seedError) throw seedError
           setPackages(seeded || defaultPkgs)
         } else {
           setPackages(pkgs)
         }
       } catch (err) {
-        console.error("Gagal memuat paket premium:", err)
-        // Fallback local state if Supabase connection fails/offline
+        console.error('Gagal memuat paket premium:', err)
         setPackages([
-          { 
-            id: 'mock-p1',
-            name: 'Bulanan Premium', 
-            price: 49000, 
-            features: ['Pemutaran Lagu Full (Tanpa Batas)', 'Sleep Timer Aktif', 'Kecepatan Putar Kustom', 'Audio Kualitas FLAC'], 
-            duration_days: 30 
-          },
-          { 
-            id: 'mock-p2',
-            name: 'Tahunan Premium', 
-            price: 299000, 
-            features: ['Semua Fitur Paket Bulanan', 'Hemat Lebih Banyak', 'Badge Premium Spesial'], 
-            duration_days: 365 
-          }
+          { id: 'mock-p1', name: 'Bulanan Premium', price: 49000, features: ['Pemutaran Lagu Full (Tanpa Batas)', 'Sleep Timer Aktif', 'Kecepatan Putar Kustom', 'Audio Kualitas FLAC'], duration_days: 30 },
+          { id: 'mock-p2', name: 'Tahunan Premium', price: 299000, features: ['Semua Fitur Paket Bulanan', 'Hemat Lebih Banyak', 'Badge Premium Spesial'], duration_days: 365 }
         ])
       } finally {
         setLoadingPackages(false)
@@ -96,225 +76,141 @@ export default function PremiumModal({ isOpen, onClose }) {
     loadPackages()
   }, [isOpen])
 
-  // Reset steps on close or open
+  // Reset on open
   useEffect(() => {
     if (isOpen) {
-      const timer = setTimeout(() => {
+      queueMicrotask(() => {
         setPaymentStep('select_package')
         setSelectedPkg(null)
-        setSelectedPayment(null)
         setVoucherCode('')
         setVoucherError('')
-        setDuitkuTx(null)
-      }, 0)
-      return () => clearTimeout(timer)
+      })
     }
   }, [isOpen])
 
-  // Duitku success auto-detection polling
+  // Poll for premium status when waiting
   useEffect(() => {
-    let pollInterval = null;
-    if (paymentStep === 'duitku_checkout' && user) {
-      // Poll user profile every 3 seconds to auto-detect payment status
+    let pollInterval = null
+    if (paymentStep === 'waiting' && user) {
       pollInterval = setInterval(async () => {
-        const prevPremiumUntil = profile?.premium_until;
-        await checkUser(); // Refetch profile
-        
-        const updatedProfile = useAuthStore.getState().profile;
+        const prevPremiumUntil = profile?.premium_until
+        await checkUser()
+        const updatedProfile = useAuthStore.getState().profile
         if (updatedProfile?.premium_until && updatedProfile.premium_until !== prevPremiumUntil) {
-          const expDate = new Date(updatedProfile.premium_until);
+          const expDate = new Date(updatedProfile.premium_until)
           if (expDate > new Date()) {
-            clearInterval(pollInterval);
-            setPaymentStep('success');
+            clearInterval(pollInterval)
+            setPaymentStep('success')
           }
         }
-      }, 3000);
+      }, 3000)
     }
-
-    return () => {
-      if (pollInterval) clearInterval(pollInterval);
-    };
-  }, [paymentStep, user]);
+    return () => { if (pollInterval) clearInterval(pollInterval) }
+  }, [paymentStep, user])
 
   if (!isOpen) return null
 
-  const handleNextToPayment = (pkg) => {
-    setSelectedPkg(pkg)
-    setPaymentStep('select_payment')
-  }
-
-  const handleConfirmPayment = async () => {
-    if (!selectedPkg || !selectedPayment) return
+  // Handle package selection → create transaction → open Duitku Pop
+  const handleSelectPackage = async (pkg) => {
     if (!user) {
-      alert("Silakan masuk akun terlebih dahulu.")
+      alert('Silakan masuk akun terlebih dahulu.')
       onClose()
       return
     }
 
+    setSelectedPkg(pkg)
     setPaymentStep('processing')
 
     try {
-      // Call Duitku inquiry endpoint
       const response = await fetch(`${MUSIC_SERVICE_URL}/api/payment/create`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId: user.id,
-          packageId: selectedPkg.id,
-          paymentMethod: selectedPayment.id === 'qris' ? 'Q1' : selectedPayment.id === 'transfer' ? 'M1' : 'SP', // Q1 = QRIS, M1 = Mandiri VA, SP = ShopeePay
+          packageId: pkg.id,
           email: user.email
         })
-      });
+      })
 
-      const resData = await response.json();
+      const resData = await response.json()
 
       if (!response.ok || !resData.success) {
-        throw new Error(resData.error || 'Gagal menghubungi payment gateway Duitku.');
+        throw new Error(resData.error || 'Gagal menghubungi payment gateway.')
       }
 
-      setDuitkuTx(resData);
-      setPaymentStep('duitku_checkout');
-
-      // Trigger Duitku Pop-up Payment Gateway
-      if (window.checkout) {
+      // Use Duitku Pop if available, else redirect to paymentUrl
+      if (window.checkout && resData.reference && !resData.isSandboxFallback) {
+        // Duitku Pop JS loaded → open the popup with the reference
+        setPaymentStep('waiting')
         window.checkout.process(resData.reference, {
-          successEvent: function (result) {
-            console.log('Duitku Success:', result);
-            setPaymentStep('success');
-            checkUser();
+          successEvent: function () {
+            checkUser()
+            setPaymentStep('success')
           },
-          pendingEvent: function (result) {
-            console.log('Duitku Pending:', result);
+          pendingEvent: function () {
+            setPaymentStep('waiting')
           },
-          errorEvent: function (result) {
-            console.error('Duitku Error:', result);
-            alert('Pembayaran gagal atau dibatalkan.');
-            setPaymentStep('select_payment');
+          errorEvent: function () {
+            alert('Pembayaran gagal atau dibatalkan. Silakan coba lagi.')
+            setPaymentStep('select_package')
           },
           closeEvent: function () {
-            console.log('Duitku Popup Closed');
+            // User closed the popup — stay on waiting step in case they paid
+            setPaymentStep('waiting')
           }
-        });
+        })
+      } else if (resData.paymentUrl) {
+        // Redirect to Duitku hosted payment page
+        setPaymentStep('waiting')
+        window.open(resData.paymentUrl, '_blank')
       } else {
-        console.warn("Duitku JS not loaded, falling back to new window redirect");
-        if (resData.paymentUrl) {
-          window.open(resData.paymentUrl, '_blank');
-        }
+        // Sandbox fallback — Duitku API couldn't create a transaction
+        // This happens when sandbox credentials aren't set up yet
+        alert('Tidak dapat terhubung ke Duitku sandbox. Pastikan Merchant Code & API Key sudah dikonfigurasi dengan benar di server.')
+        setPaymentStep('select_package')
       }
     } catch (error) {
-      console.error("Duitku Payment Error:", error);
-      alert("Terjadi kesalahan saat memproses pembayaran: " + error.message);
-      setPaymentStep('select_payment');
-    }
-  }
-
-  const handleSimulateCallback = async () => {
-    if (!duitkuTx || simulatingCallback) return;
-    setSimulatingCallback(true);
-
-    try {
-      // Call callback endpoint with simulated successful signature
-      const response = await fetch(`${MUSIC_SERVICE_URL}/api/payment/callback`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          merchantCode: 'DS31208',
-          amount: duitkuTx.amount,
-          merchantOrderId: duitkuTx.merchantOrderId,
-          productDetails: selectedPkg.name,
-          additionalParam: user.id,
-          paymentCode: selectedPayment.id === 'qris' ? 'Q1' : selectedPayment.id === 'transfer' ? 'M1' : 'SP',
-          resultCode: '00',
-          reference: duitkuTx.reference,
-          signature: 'mock_sandbox_bypass_signature'
-        })
-      });
-
-      const res = await response.json();
-      if (!response.ok || !res.success) {
-        throw new Error(res.error || 'Simulasi callback gagal.');
-      }
-
-      await checkUser(); // reload profile
-      setPaymentStep('success');
-    } catch (err) {
-      alert("Simulasi pembayaran gagal: " + err.message);
-    } finally {
-      setSimulatingCallback(false);
+      console.error('Payment Error:', error)
+      alert('Terjadi kesalahan saat memproses pembayaran: ' + error.message)
+      setPaymentStep('select_package')
     }
   }
 
   const handleRedeemVoucher = async (e) => {
-    e.preventDefault();
-    if (!voucherCode.trim()) return;
+    e.preventDefault()
+    if (!voucherCode.trim()) return
+    if (!user) { alert('Silakan masuk akun terlebih dahulu.'); return }
 
-    setRedeemingVoucher(true);
-    setVoucherError('');
+    setRedeemingVoucher(true)
+    setVoucherError('')
 
     try {
       const response = await fetch(`${MUSIC_SERVICE_URL}/api/payment/redeem-voucher`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          userId: user.id,
-          voucherCode: voucherCode.trim()
-        })
-      });
-
-      const resData = await response.json();
-
-      if (!response.ok || !resData.success) {
-        throw new Error(resData.error || 'Gagal klaim voucher.');
-      }
-
-      await checkUser(); // reload profile
-
-      // Set packaging details dynamically for success screen
-      setSelectedPkg({
-        name: `Redeem Voucher: ${voucherCode.trim()}`,
-        duration_days: resData.durationDays
-      });
-      
-      setPaymentStep('success');
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, voucherCode: voucherCode.trim() })
+      })
+      const resData = await response.json()
+      if (!response.ok || !resData.success) throw new Error(resData.error || 'Gagal klaim voucher.')
+      await checkUser()
+      setSelectedPkg({ name: `Voucher: ${voucherCode.trim()}`, duration_days: resData.durationDays })
+      setPaymentStep('success')
     } catch (err) {
-      setVoucherError(err.message);
+      setVoucherError(err.message)
     } finally {
-      setRedeemingVoucher(false);
+      setRedeemingVoucher(false)
     }
   }
 
-  const paymentMethods = [
-    { id: 'qris', name: 'QRIS / E-Wallet (Duitku)', icon: QrCode, desc: 'Instan via QRIS, GoPay, OVO, Dana' },
-    { id: 'transfer', name: 'Virtual Account (Duitku)', icon: CreditCard, desc: 'BCA, Mandiri, BNI, BRI, Permata VA' }
-  ]
-
-  // Formatter for WIB datetime output
   const formatToWIB = (dateString) => {
-    if (!dateString) return "";
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return "";
-    
-    // Far future date represents unlimited
-    if (date.getFullYear() >= 9999) {
-      return "Selamanya (Unlimited / Tanpa Batas)";
-    }
-
-    const options = {
-      timeZone: 'Asia/Jakarta',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    };
-    return date.toLocaleString('id-ID', options) + ' WIB';
+    if (!dateString) return ''
+    const date = new Date(dateString)
+    if (isNaN(date.getTime())) return ''
+    if (date.getFullYear() >= 9999) return 'Selamanya (Unlimited)'
+    return date.toLocaleString('id-ID', {
+      timeZone: 'Asia/Jakarta', year: 'numeric', month: 'long',
+      day: 'numeric', hour: '2-digit', minute: '2-digit'
+    }) + ' WIB'
   }
 
   return (
@@ -328,16 +224,16 @@ export default function PremiumModal({ isOpen, onClose }) {
         className="fixed inset-0 bg-black/70 backdrop-blur-md"
       />
 
-      {/* Modal Container */}
+      {/* Modal */}
       <motion.div
         initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.95, opacity: 0 }}
         className="relative w-full max-w-lg bg-background-card border border-primary/40 rounded-3xl p-6 shadow-2xl backdrop-blur-xl z-10 text-left overflow-hidden flex flex-col max-h-[90vh]"
       >
-        {/* Glow Effects */}
-        <div className="absolute -top-24 -right-24 w-48 h-48 bg-primary/20 rounded-full blur-3xl pointer-events-none"></div>
-        <div className="absolute -bottom-24 -left-24 w-48 h-48 bg-accent/15 rounded-full blur-3xl pointer-events-none"></div>
+        {/* Glow */}
+        <div className="absolute -top-24 -right-24 w-48 h-48 bg-primary/20 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-24 -left-24 w-48 h-48 bg-accent/15 rounded-full blur-3xl pointer-events-none" />
 
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-gray-border/50 shrink-0">
@@ -350,10 +246,10 @@ export default function PremiumModal({ isOpen, onClose }) {
           </button>
         </div>
 
-        {/* Content Box */}
+        {/* Content */}
         <div className="flex-1 overflow-y-auto py-4 space-y-5 pr-1 no-scrollbar">
-          
-          {/* STEP 1: SELECT PACKAGE & VOUCHER INPUT */}
+
+          {/* STEP 1: SELECT PACKAGE */}
           {paymentStep === 'select_package' && (
             <div className="space-y-5">
               <div className="text-center py-1">
@@ -362,6 +258,9 @@ export default function PremiumModal({ isOpen, onClose }) {
                   Buka Akses Penuh Kualitas Studio
                 </h4>
                 <p className="text-[11px] text-gray-text mt-1">Dengarkan lagu penuh, kualitas Stereo/Hi-Fi & lirik synced tanpa batasan.</p>
+                <p className="text-[10px] text-gray-muted mt-2 bg-primary/5 border border-primary/20 rounded-lg p-2">
+                  💳 Pilih paket lalu klik <strong className="text-white">Bayar Sekarang</strong> — Duitku akan membuka halaman pembayaran dengan berbagai metode (QRIS, E-Wallet, Transfer Bank, dll).
+                </p>
               </div>
 
               {loadingPackages ? (
@@ -372,20 +271,15 @@ export default function PremiumModal({ isOpen, onClose }) {
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {packages.map((pkg) => (
-                    <div 
-                      key={pkg.id} 
-                      className={`relative flex flex-col justify-between p-4 rounded-2xl border transition-all ${
-                        selectedPkg?.id === pkg.id 
-                          ? 'bg-primary/5 border-primary shadow-lg shadow-primary/5' 
-                          : 'bg-background/40 border-gray-border hover:border-gray-border/80'
-                      }`}
+                    <div
+                      key={pkg.id}
+                      className="relative flex flex-col justify-between p-4 rounded-2xl border bg-background/40 border-gray-border hover:border-primary/40 transition-all"
                     >
                       {pkg.duration_days === 365 && (
                         <span className="absolute -top-2.5 right-4 bg-primary text-white text-[8px] font-extrabold uppercase px-2 py-0.5 rounded-full tracking-wider shadow-md">
                           Terbaik
                         </span>
                       )}
-                      
                       <div className="space-y-3">
                         <div>
                           <h5 className="text-xs font-bold text-white">{pkg.name}</h5>
@@ -394,7 +288,6 @@ export default function PremiumModal({ isOpen, onClose }) {
                             <span className="text-[9px] text-gray-muted">/ {pkg.duration_days} hari</span>
                           </div>
                         </div>
-
                         <ul className="space-y-1.5">
                           {pkg.features?.map((feat, idx) => (
                             <li key={idx} className="flex items-start gap-1.5 text-[10px] text-gray-text leading-tight">
@@ -404,26 +297,24 @@ export default function PremiumModal({ isOpen, onClose }) {
                           ))}
                         </ul>
                       </div>
-
-                      <button 
-                        onClick={() => handleNextToPayment(pkg)}
-                        className="w-full mt-4 bg-primary hover:bg-primary-hover text-white text-[10px] font-bold py-2 rounded-xl transition-all shadow-md shadow-primary/10"
+                      <button
+                        onClick={() => handleSelectPackage(pkg)}
+                        className="w-full mt-4 bg-primary hover:bg-primary-hover text-white text-[10px] font-bold py-2 rounded-xl transition-all shadow-md shadow-primary/10 flex items-center justify-center gap-1.5"
                       >
-                        Pilih Paket
+                        💳 Bayar Sekarang via Duitku
                       </button>
                     </div>
                   ))}
                 </div>
               )}
 
-              {/* VOUCHER REDEEM INPUT */}
+              {/* VOUCHER */}
               <div className="bg-background/40 border border-gray-border/60 p-4 rounded-2xl space-y-3">
                 <h5 className="text-xs font-bold text-white flex items-center gap-1.5">
-                  <Ticket className="w-4.5 h-4.5 text-primary-light" />
+                  <Ticket className="w-4 h-4 text-primary-light" />
                   Punya Kode Voucher?
                 </h5>
-                <p className="text-[10px] text-gray-text leading-relaxed">Masukkan kode voucher Anda di bawah ini untuk mengklaim akses premium gratis dari admin.</p>
-                
+                <p className="text-[10px] text-gray-text leading-relaxed">Masukkan kode voucher dari admin untuk mengklaim akses premium gratis.</p>
                 <form onSubmit={handleRedeemVoucher} className="flex gap-2">
                   <input
                     type="text"
@@ -440,146 +331,12 @@ export default function PremiumModal({ isOpen, onClose }) {
                     {redeemingVoucher ? <Loader className="w-3.5 h-3.5 animate-spin" /> : 'Gunakan'}
                   </button>
                 </form>
-
-                {voucherError && (
-                  <p className="text-[10px] text-red-500 font-semibold">{voucherError}</p>
-                )}
+                {voucherError && <p className="text-[10px] text-red-500 font-semibold">{voucherError}</p>}
               </div>
             </div>
           )}
 
-          {/* STEP 2: SELECT PAYMENT METHOD */}
-          {paymentStep === 'select_payment' && selectedPkg && (
-            <div className="space-y-4">
-              <div>
-                <button 
-                  onClick={() => setPaymentStep('select_package')}
-                  className="text-[10px] text-primary-light font-bold hover:underline mb-2 block"
-                >
-                  ← Kembali ke Pemilihan Paket
-                </button>
-                <div className="bg-background/50 border border-gray-border/60 p-3.5 rounded-2xl flex justify-between items-center">
-                  <div>
-                    <h4 className="text-[11px] font-bold text-gray-muted uppercase tracking-wider">Paket Pilihan</h4>
-                    <p className="text-xs font-bold text-white mt-0.5">{selectedPkg.name}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-[11px] font-bold text-gray-muted uppercase tracking-wider">Total Bayar</p>
-                    <p className="text-sm font-black text-white mt-0.5">Rp {selectedPkg.price.toLocaleString('id-ID')}</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-2.5">
-                <h4 className="text-xs font-bold text-white pl-1">Metode Pembayaran</h4>
-                <div className="space-y-2">
-                  {paymentMethods.map((pm) => {
-                    const PMIcon = pm.icon
-                    const isSelected = selectedPayment?.id === pm.id
-                    return (
-                      <button
-                        key={pm.id}
-                        onClick={() => setSelectedPayment(pm)}
-                        className={`w-full flex items-center justify-between p-3 rounded-xl border transition-all text-left ${
-                          isSelected 
-                            ? 'bg-primary/5 border-primary' 
-                            : 'bg-background/40 border-gray-border hover:border-gray-border/80'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className={`p-2 rounded-lg ${isSelected ? 'bg-primary/20 text-primary-light' : 'bg-background-sidebar text-gray-text'}`}>
-                            <PMIcon className="w-4 h-4" />
-                          </div>
-                          <div>
-                            <p className="text-xs font-bold text-white">{pm.name}</p>
-                            <p className="text-[9px] text-gray-text mt-0.5">{pm.desc}</p>
-                          </div>
-                        </div>
-                        <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${isSelected ? 'border-primary bg-primary text-white' : 'border-gray-border'}`}>
-                          {isSelected && <Check className="w-2.5 h-2.5 stroke-[3px]" />}
-                        </div>
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-
-              <button
-                onClick={handleConfirmPayment}
-                disabled={!selectedPayment}
-                className="w-full bg-primary hover:bg-primary-hover disabled:opacity-40 disabled:hover:bg-primary text-white text-xs font-bold py-2.5 rounded-xl transition-all shadow-lg shadow-primary/10 mt-3"
-              >
-                Konfirmasi & Buat Tagihan Duitku
-              </button>
-            </div>
-          )}
-
-          {/* STEP 3: DUITKU CUSTOM MERCHANT CHECKOUT PANEL */}
-          {paymentStep === 'duitku_checkout' && duitkuTx && selectedPkg && (
-            <div className="space-y-4">
-              <button 
-                onClick={() => setPaymentStep('select_payment')}
-                className="text-[10px] text-primary-light font-bold hover:underline mb-1 block"
-              >
-                ← Kembali ke Pemilihan Pembayaran
-              </button>
-
-              <div className="bg-background-card border border-primary/20 rounded-2xl p-4 space-y-4 text-center">
-                <div className="pb-3 border-b border-gray-border/30">
-                  <span className="text-[10px] bg-primary/20 text-primary-light px-2 py-0.5 rounded font-bold uppercase">Menunggu Pembayaran</span>
-                  <h4 className="text-sm font-bold text-white mt-2">Duitku Invoice: {duitkuTx.merchantOrderId}</h4>
-                  <p className="text-xs text-gray-text mt-0.5">Total Tagihan: <span className="font-extrabold text-white">Rp {duitkuTx.amount.toLocaleString('id-ID')}</span></p>
-                </div>
-
-                {/* QRIS Channel */}
-                {selectedPayment.id === 'qris' ? (
-                  <div className="flex flex-col items-center space-y-3">
-                    <p className="text-[11px] text-gray-text font-medium">Scan QR Code di bawah menggunakan aplikasi e-wallet Anda (GoPay, OVO, DANA, LinkAja, dll.)</p>
-                    
-                    {/* Simulated QRIS Code Card */}
-                    <div className="p-3 bg-white rounded-xl shadow-lg inline-block">
-                      {/* Standard QR Code SVG representation */}
-                      <svg className="w-40 h-40" viewBox="0 0 100 100" shapeRendering="crispEdges">
-                        <path fill="#000" d="M0 0h30v30H0zm0 70h30v30H0zm70 0h30v30H70zm70-70h30v30H70zM10 10v10h10V10zm0 70v10h10V80zm70 0v10h10V80zm0-70v10h10V10zm25 15h10v10H95zm-30 20h10v10H65zm-20 0h10v10H45zm-15 0h10v10H30zm30 15h10v10H60zm-20 0h10v10H40zm-15 0h10v10H25zm50 15h10v10H75zm-15 0h10v10H60zm-20 0h10v10H40zm-15 0h10v10H25z"/>
-                      </svg>
-                      <div className="mt-2 text-center text-[9px] font-black text-black uppercase tracking-widest border-t border-gray-border/20 pt-1.5">QRIS LUNAS - NEXTUNE</div>
-                    </div>
-                    
-                    <p className="text-[10px] text-gray-muted font-mono bg-background px-3 py-1.5 rounded-lg">Ref: {duitkuTx.reference}</p>
-                  </div>
-                ) : (
-                  // Virtual Account Channel
-                  <div className="space-y-3">
-                    <p className="text-[11px] text-gray-text">Silakan lakukan transfer bank ke nomor Virtual Account Mandiri / Bersama berikut:</p>
-                    <div className="p-4 bg-background border border-gray-border/60 rounded-xl space-y-2">
-                      <p className="text-[10px] text-gray-muted uppercase font-bold tracking-wider">Nomor Virtual Account</p>
-                      <p className="text-xl font-mono font-black text-primary-light tracking-wider select-all">{duitkuTx.vaNumber}</p>
-                      <p className="text-[10px] text-gray-text font-bold mt-1">Nama Rekening: <span className="text-white">NEXTUNE STREAMING</span></p>
-                    </div>
-                  </div>
-                )}
-
-                <div className="pt-3 border-t border-gray-border/30 flex flex-col gap-2 items-center">
-                  <div className="flex items-center gap-1.5 text-[10px] text-gray-muted animate-pulse">
-                    <Loader className="w-3.5 h-3.5 animate-spin text-primary" />
-                    <span>Mendeteksi status pembayaran secara otomatis...</span>
-                  </div>
-
-                  {/* Sandbox Webhook Simulation Button */}
-                  <button
-                    onClick={handleSimulateCallback}
-                    disabled={simulatingCallback}
-                    className="w-full bg-accent/20 border border-accent/40 hover:bg-accent/30 text-accent text-[10px] font-bold py-2 rounded-xl transition-all flex items-center justify-center gap-1.5 mt-2"
-                  >
-                    {simulatingCallback ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-                    Simulasikan Bayar Lunas (Webhook Duitku)
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* STEP 4: PROCESSING PAYMENT */}
+          {/* STEP 2: PROCESSING */}
           {paymentStep === 'processing' && (
             <div className="flex flex-col items-center justify-center py-16 space-y-4">
               <div className="relative">
@@ -588,12 +345,52 @@ export default function PremiumModal({ isOpen, onClose }) {
               </div>
               <div className="text-center space-y-1">
                 <h4 className="text-xs font-bold text-white">Menghubungi Duitku...</h4>
-                <p className="text-[10px] text-gray-text">Mohon jangan menutup jendela ini atau memuat ulang halaman.</p>
+                <p className="text-[10px] text-gray-text">Membuat sesi pembayaran, mohon tunggu sebentar.</p>
               </div>
             </div>
           )}
 
-          {/* STEP 5: SUCCESS */}
+          {/* STEP 3: WAITING FOR PAYMENT */}
+          {paymentStep === 'waiting' && selectedPkg && (
+            <div className="flex flex-col items-center justify-center py-12 space-y-5 text-center">
+              <div className="w-16 h-16 bg-primary/10 border border-primary/30 rounded-full flex items-center justify-center">
+                <Loader className="w-8 h-8 text-primary animate-spin" />
+              </div>
+              <div className="space-y-2">
+                <h4 className="text-sm font-bold text-white">Menunggu Konfirmasi Pembayaran</h4>
+                <p className="text-[11px] text-gray-text max-w-xs mx-auto leading-relaxed">
+                  Halaman pembayaran Duitku telah dibuka. Selesaikan pembayaran di sana. Halaman ini akan otomatis diperbarui setelah pembayaran berhasil.
+                </p>
+                <p className="text-[10px] text-gray-muted mt-2 bg-background/50 border border-gray-border/30 rounded-xl px-4 py-2">
+                  Paket: <strong className="text-white">{selectedPkg.name}</strong>
+                </p>
+              </div>
+              <div className="flex flex-col gap-2 w-full max-w-xs">
+                <button
+                  onClick={async () => {
+                    await checkUser()
+                    const updatedProfile = useAuthStore.getState().profile
+                    if (updatedProfile?.premium_until && new Date(updatedProfile.premium_until) > new Date()) {
+                      setPaymentStep('success')
+                    } else {
+                      alert('Pembayaran belum terdeteksi. Silakan tunggu beberapa saat atau periksa email konfirmasi dari Duitku.')
+                    }
+                  }}
+                  className="w-full bg-primary hover:bg-primary-hover text-white text-xs font-bold py-2.5 rounded-xl transition-all"
+                >
+                  Cek Status Pembayaran
+                </button>
+                <button
+                  onClick={() => setPaymentStep('select_package')}
+                  className="text-[10px] text-gray-text hover:text-white transition-colors"
+                >
+                  ← Kembali ke Pilihan Paket
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* STEP 4: SUCCESS */}
           {paymentStep === 'success' && selectedPkg && (
             <div className="flex flex-col items-center justify-center py-12 space-y-6 text-center">
               <div className="w-14 h-14 bg-primary/10 border border-primary/20 rounded-full flex items-center justify-center text-primary-light shadow-lg shadow-primary/5">
@@ -602,9 +399,9 @@ export default function PremiumModal({ isOpen, onClose }) {
               <div className="space-y-2">
                 <h4 className="text-sm font-black text-white">Aktivasi Sukses! 🎉</h4>
                 <p className="text-[11px] text-gray-text max-w-xs mx-auto leading-relaxed">
-                  Selamat! Paket **{selectedPkg.name}** Anda telah aktif. Seluruh pembatasan akun dicabut. Kualitas audio Stereo, Hi-Fi, dan mode equalizer suara kini siap digunakan.
+                  Selamat! Paket <strong className="text-white">{selectedPkg.name}</strong> aktif. Kualitas Stereo, Hi-Fi, dan semua fitur premium kini siap digunakan.
                 </p>
-                <div className="bg-background-sidebar/60 border border-gray-border/30 px-4 py-3 rounded-2xl inline-block mt-3 text-center space-y-1">
+                <div className="bg-background-sidebar/60 border border-gray-border/30 px-4 py-3 rounded-2xl inline-block mt-3 space-y-1">
                   <p className="text-[9px] text-gray-muted uppercase font-bold tracking-wider">Masa Berlaku Premium Hingga</p>
                   <p className="text-xs font-black text-white">
                     {profile?.premium_until ? formatToWIB(profile.premium_until) : 'Unlimited'}

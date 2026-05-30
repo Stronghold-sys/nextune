@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Compass, Search as SearchIcon, Library as LibIcon, User, ShieldAlert, Bell, X } from 'lucide-react'
+import { Compass, Search as SearchIcon, Library as LibIcon, User, ShieldAlert, Bell, X, Settings } from 'lucide-react'
 import { useAuthStore } from './store/useAuthStore'
 import { usePlayerStore } from './store/usePlayerStore'
 import { supabase } from './supabaseClient'
@@ -24,6 +24,7 @@ export default function App() {
   const [showSplash, setShowSplash] = useState(true)
   const [currentPage, setCurrentPage] = useState("home") // 'home' | 'search' | 'library' | 'profile' | 'admin'
   const [authModalState, setAuthModalState] = useState({ isOpen: false, defaultMode: 'login' })
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
 
   // Notification States
   const [notifications, setNotifications] = useState([])
@@ -112,6 +113,10 @@ export default function App() {
 
   const isAdminUser = profile && ['admin', 'super_admin', 'content_admin'].includes(profile.role)
 
+  if (isAdminUser) {
+    return <Dashboard />
+  }
+
   return (
     <div className="min-h-screen bg-background text-white flex flex-col font-sans select-none">
       
@@ -128,7 +133,16 @@ export default function App() {
 
         {/* Header Right Actions */}
         <div className="flex items-center gap-4">
-          
+
+          {/* Settings Button */}
+          <button 
+            onClick={() => setIsSettingsOpen(true)}
+            className="p-1.5 hover:text-white text-gray-text transition-colors"
+            title="Pengaturan"
+          >
+            <Settings className="w-5 h-5" />
+          </button>
+
           {/* Notification Button & Red Dot indicator */}
           <div className="relative">
             <button 
@@ -310,6 +324,108 @@ export default function App() {
         defaultMode={authModalState.defaultMode}
         onClose={() => setAuthModalState({ isOpen: false, defaultMode: 'login' })}
       />
+
+      {/* 6. SETTINGS MODAL */}
+      <AnimatePresence>
+        {isSettingsOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsSettingsOpen(false)}
+              className="fixed inset-0 bg-background/80 backdrop-blur-md"
+            />
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="relative w-full max-w-md bg-background-card border border-primary/30 rounded-2xl p-6 shadow-2xl backdrop-blur-xl z-10 space-y-6 text-left"
+            >
+              <div className="flex items-center justify-between pb-3 border-b border-gray-border/50">
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <Settings className="w-5 h-5 text-primary" /> Pengaturan Aplikasi
+                </h3>
+                <button onClick={() => setIsSettingsOpen(false)} className="text-gray-text hover:text-white">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4 text-xs">
+                {/* Dark / Light Mode */}
+                <div className="flex items-center justify-between p-3 bg-background/50 border border-gray-border/40 rounded-xl">
+                  <div>
+                    <h4 className="font-bold text-white">Mode Tampilan</h4>
+                    <p className="text-[10px] text-gray-text mt-0.5">Pilih tema gelap atau terang</p>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      const root = document.documentElement;
+                      if (root.classList.contains('light')) {
+                        root.classList.remove('light');
+                        localStorage.setItem('theme', 'dark');
+                      } else {
+                        root.classList.add('light');
+                        localStorage.setItem('theme', 'light');
+                      }
+                      alert("Tema berhasil diubah!");
+                    }}
+                    className="bg-primary hover:bg-primary-hover text-white font-bold px-3 py-1.5 rounded-lg"
+                  >
+                    Ubah Tema
+                  </button>
+                </div>
+
+                {/* Streaming Quality */}
+                <div className="flex items-center justify-between p-3 bg-background/50 border border-gray-border/40 rounded-xl">
+                  <div>
+                    <h4 className="font-bold text-white">Kualitas Audio</h4>
+                    <p className="text-[10px] text-gray-text mt-0.5">Atur resolusi audio streaming</p>
+                  </div>
+                  <select 
+                    defaultValue={localStorage.getItem('stream_quality') || 'high'}
+                    onChange={(e) => {
+                      localStorage.setItem('stream_quality', e.target.value);
+                      alert(`Kualitas diatur ke: ${e.target.value === 'low' ? 'Rendah' : e.target.value === 'medium' ? 'Standar' : 'Tinggi (FLAC)'}`);
+                    }}
+                    className="bg-background border border-gray-border rounded-lg px-2.5 py-1.5 text-white focus:outline-none text-xs"
+                  >
+                    <option value="low">Rendah (96kbps)</option>
+                    <option value="medium">Standar (192kbps)</option>
+                    <option value="high">Tinggi (320kbps / FLAC)</option>
+                  </select>
+                </div>
+
+                {/* Clear Cache */}
+                <div className="flex items-center justify-between p-3 bg-background/50 border border-gray-border/40 rounded-xl">
+                  <div>
+                    <h4 className="font-bold text-white">Pembersihan</h4>
+                    <p className="text-[10px] text-gray-text mt-0.5">Hapus cache penyimpanan lokal</p>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      localStorage.removeItem("nextune_offline_tracks");
+                      alert("Cache pemutaran & data offline berhasil dihapus!");
+                    }}
+                    className="bg-accent/20 border border-accent/30 text-accent font-bold px-3 py-1.5 rounded-lg hover:bg-accent/30"
+                  >
+                    Hapus Cache
+                  </button>
+                </div>
+
+                {/* About NexTune */}
+                <div className="p-3 bg-background/50 border border-gray-border/40 rounded-xl space-y-1">
+                  <h4 className="font-bold text-white">Tentang NexTune</h4>
+                  <p className="text-[10px] text-gray-text leading-relaxed">
+                    NexTune adalah aplikasi streaming musik modern premium yang dirancang untuk memberikan pengalaman audio tanpa hambatan dengan kualitas studio terbaik.
+                  </p>
+                  <p className="text-[9px] text-gray-muted mt-1 font-mono">Versi 1.0.0 (Release-Build)</p>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
     </div>
   )

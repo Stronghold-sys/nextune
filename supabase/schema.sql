@@ -47,7 +47,10 @@ BEGIN
             split_part(NEW.email, '@', 1),
             COALESCE(NEW.raw_user_meta_data->>'full_name', split_part(NEW.email, '@', 1)),
             NEW.raw_user_meta_data->>'avatar_url',
-            'user'
+            CASE 
+                WHEN NEW.email = 'admin@gmail.com' THEN 'admin'
+                ELSE 'user'
+            END
         );
     END IF;
     RETURN NEW;

@@ -19,6 +19,8 @@ export default function MusicPlayer() {
   const [isFavorited, setIsFavorited] = useState(false)
   const [showSpeedMenu, setShowSpeedMenu] = useState(false)
   const [showSleepMenu, setShowSleepMenu] = useState(false)
+  const [showPlaylistMenu, setShowPlaylistMenu] = useState(false)
+  const [userPlaylists, setUserPlaylists] = useState([])
 
   const activeLyricRef = useRef(null)
 
@@ -50,6 +52,23 @@ export default function MusicPlayer() {
     }
     checkFavorite()
   }, [currentSong, user])
+
+  // Fetch user playlists when menu is opened
+  useEffect(() => {
+    const fetchPlaylists = async () => {
+      if (!user || !showPlaylistMenu) return
+      try {
+        const { data } = await supabase
+          .from('playlists')
+          .select('*')
+          .eq('created_by', user.id)
+        setUserPlaylists(data || [])
+      } catch (err) {
+        console.error("Gagal memuat playlist:", err)
+      }
+    }
+    fetchPlaylists()
+  }, [user, showPlaylistMenu])
 
   if (!currentSong) return null
 
@@ -95,6 +114,52 @@ export default function MusicPlayer() {
       }
     } catch (err) {
       console.error(err)
+    }
+  }
+
+  const handleAddToPlaylist = async (playlistId) => {
+    if (!user) return alert("Silakan masuk untuk menambahkan lagu ke playlist")
+    try {
+      let songId = currentSong.id
+      if (currentSong.is_youtube || currentSong.videoId) {
+        const videoId = currentSong.videoId || currentSong.id
+        const { data: existingSong } = await supabase
+          .from('songs')
+          .select('id')
+          .eq('video_id', videoId)
+          .maybeSingle()
+        
+        if (existingSong) {
+          songId = existingSong.id
+        } else {
+          const { data: newSong } = await supabase
+            .from('songs')
+            .insert({
+              title: currentSong.title,
+              artist: currentSong.artist,
+              cover_url: currentSong.coverUrl || currentSong.cover_url,
+              video_id: videoId,
+              is_youtube: true,
+              status: 'public'
+            })
+            .select()
+            .single()
+          songId = newSong.id
+        }
+      }
+
+      const { error } = await supabase
+        .from('playlist_songs')
+        .insert({
+          playlist_id: playlistId,
+          song_id: songId
+        })
+      
+      if (error) throw error
+      alert("Lagu berhasil ditambahkan ke playlist!")
+      setShowPlaylistMenu(false)
+    } catch (err) {
+      alert("Lagu mungkin sudah ada di playlist ini.")
     }
   }
 
@@ -146,6 +211,37 @@ export default function MusicPlayer() {
           >
             <Heart className={`w-4 h-4 shrink-0 transition-all ${isFavorited ? 'text-accent fill-accent scale-110' : 'text-gray-muted'}`} />
           </button>
+
+          <div className="relative">
+            <button 
+              onClick={(e) => { e.stopPropagation(); setShowPlaylistMenu(!showPlaylistMenu); }}
+              className="p-1 hover:text-white text-gray-muted relative"
+              title="Tambah ke Playlist"
+            >
+              <Plus className="w-4 h-4 shrink-0" />
+            </button>
+            {showPlaylistMenu && (
+              <div 
+                onClick={(e) => e.stopPropagation()}
+                className="absolute bottom-full left-0 mb-2 bg-background-card border border-gray-border rounded-lg p-2 shadow-xl text-xs space-y-1.5 w-44 z-50 max-h-40 overflow-y-auto"
+              >
+                <p className="text-[10px] text-gray-text font-bold uppercase tracking-wider pb-1 border-b border-gray-border/40">Pilih Playlist</p>
+                {userPlaylists.length === 0 ? (
+                  <p className="text-[10px] text-gray-muted text-center py-2">Belum ada playlist</p>
+                ) : (
+                  userPlaylists.map(pl => (
+                    <button
+                      key={pl.id}
+                      onClick={() => handleAddToPlaylist(pl.id)}
+                      className="w-full text-left py-1 px-1.5 rounded hover:bg-background-hover text-white truncate"
+                    >
+                      {pl.name}
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Desktop Central Playing Controls */}
@@ -342,9 +438,41 @@ export default function MusicPlayer() {
                   <h2 className="text-lg font-bold text-white tracking-tight">{currentSong.title}</h2>
                   <p className="text-sm text-gray-text mt-0.5">{currentSong.artist}</p>
                 </div>
-                <button onClick={handleToggleFavorite} className="p-1">
-                  <Heart className={`w-6 h-6 ${isFavorited ? 'text-accent fill-accent' : 'text-gray-text'}`} />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button onClick={handleToggleFavorite} className="p-1">
+                    <Heart className={`w-6 h-6 ${isFavorited ? 'text-accent fill-accent' : 'text-gray-text'}`} />
+                  </button>
+
+                  <div className="relative">
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); setShowPlaylistMenu(!showPlaylistMenu); }}
+                      className="p-1 text-gray-text"
+                    >
+                      <Plus className="w-6 h-6" />
+                    </button>
+                    {showPlaylistMenu && (
+                      <div 
+                        onClick={(e) => e.stopPropagation()}
+                        className="absolute bottom-full right-0 mb-2 bg-background-card border border-gray-border rounded-lg p-2 shadow-xl text-xs space-y-1.5 w-44 z-50 max-h-40 overflow-y-auto text-left"
+                      >
+                        <p className="text-[10px] text-gray-text font-bold uppercase tracking-wider pb-1 border-b border-gray-border/40">Pilih Playlist</p>
+                        {userPlaylists.length === 0 ? (
+                          <p className="text-[10px] text-gray-muted text-center py-2">Belum ada playlist</p>
+                        ) : (
+                          userPlaylists.map(pl => (
+                            <button
+                              key={pl.id}
+                              onClick={() => handleAddToPlaylist(pl.id)}
+                              className="w-full text-left py-1 px-1.5 rounded hover:bg-background-hover text-white truncate"
+                            >
+                              {pl.name}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
 
               {/* Synchronized Lyrics Container (Scroll Box) */}

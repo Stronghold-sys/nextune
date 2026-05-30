@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react'
-import { Plus, Play, Disc, Heart, Clock, Trash2, Share2, Edit3, Music } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Plus, Play, Disc, Heart, Clock, Trash2, Share2, Download } from 'lucide-react'
 import { supabase } from '../supabaseClient'
 import { useAuthStore } from '../store/useAuthStore'
 import { usePlayerStore } from '../store/usePlayerStore'
@@ -12,79 +12,102 @@ export default function Library({ onOpenAuth }) {
   const [playlists, setPlaylists] = useState([])
   const [favorites, setFavorites] = useState([])
   const [playHistory, setPlayHistory] = useState([])
-  const [loading, setLoading] = useState(false)
 
   // Modal Create Playlist States
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [playlistName, setPlaylistName] = useState("")
   const [playlistDesc, setPlaylistDesc] = useState("")
+  
+  // Lazy state initialization to avoid useEffect setState warning
+  const [offlineTrackIds, setOfflineTrackIds] = useState(() => {
+    const saved = localStorage.getItem("nextune_offline_tracks")
+    return saved ? JSON.parse(saved) : []
+  })
 
-  // Fetch library data from Supabase
-  const fetchLibraryData = async () => {
-    if (!user) return
-    setLoading(true)
-    try {
-      // 1. Fetch Playlists
-      const { data: playlistsData } = await supabase
-        .from('playlists')
-        .select('*')
-        .eq('created_by', user.id)
-        .order('created_at', { ascending: false })
-      
-      setPlaylists(playlistsData || [])
-
-      // 2. Fetch Favorites (joining with songs)
-      const { data: favsData } = await supabase
-        .from('favorites')
-        .select(`
-          id,
-          songs (
-            id, title, artist, cover_url, audio_url, is_youtube, video_id, duration_seconds
-          )
-        `)
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-
-      const mappedFavs = (favsData || []).map(f => f.songs).filter(Boolean)
-      setFavorites(mappedFavs)
-
-      // 3. Fetch Play History
-      const { data: historyData } = await supabase
-        .from('play_history')
-        .select(`
-          id,
-          songs (
-            id, title, artist, cover_url, audio_url, is_youtube, video_id, duration_seconds
-          )
-        `)
-        .eq('user_id', user.id)
-        .order('played_at', { ascending: false })
-        .limit(20)
-
-      const mappedHistory = (historyData || []).map(h => h.songs).filter(Boolean)
-      setPlayHistory(mappedHistory)
-    } catch (err) {
-      console.error("Error fetching library data:", err)
-    } finally {
-      setLoading(false)
+  const handleDownloadTrack = (trackId, e) => {
+    e.stopPropagation()
+    const saved = localStorage.getItem("nextune_offline_tracks")
+    let ids = saved ? JSON.parse(saved) : []
+    
+    if (ids.includes(trackId)) {
+      ids = ids.filter(id => id !== trackId)
+      alert("Lagu berhasil dihapus dari penyimpanan offline.")
+    } else {
+      ids.push(trackId)
+      alert("Lagu berhasil disimpan untuk diputar offline!")
     }
+    
+    setOfflineTrackIds(ids)
+    localStorage.setItem("nextune_offline_tracks", JSON.stringify(ids))
   }
 
+  // Load and subscribe to database library items safely
   useEffect(() => {
-    if (user) {
-      fetchLibraryData()
-    } else {
-      // Offline fallback mockups
-      setPlaylists([
-        { id: "mock-p1", name: "Lagu Santai Kerja", description: "Playlist musik akustik tenang", cover_url: "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&q=80" },
-        { id: "mock-p2", name: "Workout Hits", description: "Lagu penambah energi olahraga", cover_url: "https://images.unsplash.com/photo-1507838153414-b4b713384a76?w=300&q=80" }
-      ])
-      setFavorites([
-        { id: "J2X5mJ3HDYE", title: "Lagu Santai Senja", artist: "Senja Musik", coverUrl: "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&q=80" }
-      ])
-      setPlayHistory([
-        { id: "kJQP7kiw5Fk", title: "Harmoni Alam", artist: "Rileksasi Project", coverUrl: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&q=80" }
-      ])
+    let isCurrent = true
+
+    const loadData = async () => {
+      if (!user) {
+        if (isCurrent) {
+          setPlaylists([
+            { id: "mock-p1", name: "Lagu Santai Kerja", description: "Playlist musik akustik tenang", cover_url: "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&q=80" },
+            { id: "mock-p2", name: "Workout Hits", description: "Lagu penambah energi olahraga", cover_url: "https://images.unsplash.com/photo-1507838153414-b4b713384a76?w=300&q=80" }
+          ])
+          setFavorites([
+            { id: "J2X5mJ3HDYE", title: "Lagu Santai Senja", artist: "Senja Musik", coverUrl: "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&q=80" }
+          ])
+          setPlayHistory([
+            { id: "kJQP7kiw5Fk", title: "Harmoni Alam", artist: "Rileksasi Project", coverUrl: "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=300&q=80" }
+          ])
+        }
+        return
+      }
+
+      try {
+        const { data: playlistsData } = await supabase
+          .from('playlists')
+          .select('*')
+          .eq('created_by', user.id)
+          .order('created_at', { ascending: false })
+        
+        if (isCurrent) setPlaylists(playlistsData || [])
+
+        const { data: favsData } = await supabase
+          .from('favorites')
+          .select(`
+            id,
+            songs (
+              id, title, artist, cover_url, audio_url, is_youtube, video_id, duration_seconds
+            )
+          `)
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+
+        const mappedFavs = (favsData || []).map(f => f.songs).filter(Boolean)
+        if (isCurrent) setFavorites(mappedFavs)
+
+        const { data: historyData } = await supabase
+          .from('play_history')
+          .select(`
+            id,
+            songs (
+              id, title, artist, cover_url, audio_url, is_youtube, video_id, duration_seconds
+            )
+          `)
+          .eq('user_id', user.id)
+          .order('played_at', { ascending: false })
+          .limit(20)
+
+        const mappedHistory = (historyData || []).map(h => h.songs).filter(Boolean)
+        if (isCurrent) setPlayHistory(mappedHistory)
+      } catch (err) {
+        console.error("Error loading library details:", err)
+      }
+    }
+
+    loadData()
+
+    return () => {
+      isCurrent = false
     }
   }, [user])
 
@@ -263,6 +286,13 @@ export default function Library({ onOpenAuth }) {
                     <h4 className="text-sm font-semibold text-white truncate">{song.title}</h4>
                     <p className="text-xs text-gray-text truncate mt-0.5">{song.artist}</p>
                   </div>
+                  <button 
+                    onClick={(e) => handleDownloadTrack(song.id || song.videoId, e)} 
+                    className="p-1 hover:text-white"
+                    title="Unduh Offline"
+                  >
+                    <Download className={`w-4 h-4 ${offlineTrackIds.includes(song.id || song.videoId) ? 'text-primary' : 'text-gray-muted'}`} />
+                  </button>
                   <Heart className="w-4 h-4 text-accent fill-accent mr-2" />
                 </div>
               ))}

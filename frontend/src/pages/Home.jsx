@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { Play, Flame, User, Disc, Compass, Award } from 'lucide-react'
+import { Play, Flame, User, Disc, Compass, Award, Music, Sparkles } from 'lucide-react'
 import { usePlayerStore } from '../store/usePlayerStore'
 import { useAuthStore } from '../store/useAuthStore'
+import { supabase } from '../supabaseClient'
 import { CardSkeleton, SongSkeleton, BannerSkeleton } from '../components/Skeleton/SkeletonLoader'
 
 const MUSIC_SERVICE_URL = import.meta.env.VITE_MUSIC_SERVICE_URL || 'http://localhost:8001'
@@ -12,12 +13,18 @@ const MOCK_GENRES = ["Pop", "Rock", "Hip Hop", "Jazz", "R&B", "K-Pop", "EDM", "I
 export default function Home({ onOpenAuth }) {
   const { user } = useAuthStore()
   const { playSong } = usePlayerStore()
-  const [data, setData] = useState({ trendingSongs: [], popularArtists: [], popularAlbums: [] })
+  const [data, setData] = useState({ 
+    trendingSongs: [], 
+    popularArtists: [], 
+    popularAlbums: [],
+    latestSongs: [],
+    recommendations: []
+  })
   const [loading, setLoading] = useState(true)
   const [selectedGenre, setSelectedGenre] = useState("Pop")
   const [activeBanner, setActiveBanner] = useState(0)
-
-  const bannerItems = [
+  
+  const [banners, setBanners] = useState([
     {
       title: "NexTune Premium",
       desc: "Nikmati musik tanpa iklan dengan kualitas audio FLAC kualitas studio.",
@@ -30,19 +37,104 @@ export default function Home({ onOpenAuth }) {
       bg: "from-accent to-purple-800",
       cta: "Putar Sekarang"
     }
-  ]
+  ])
 
   useEffect(() => {
     const fetchHomeData = async () => {
       setLoading(true)
       try {
+        // Fetch banners from DB
+        try {
+          const { data: dbBanners } = await supabase
+            .from('banners')
+            .select('*')
+            .eq('is_active', true)
+          if (dbBanners && dbBanners.length > 0) {
+            setBanners(dbBanners.map(b => ({
+              title: b.title,
+              desc: b.link_url || "Konten Spesial Unggulan untuk Anda.",
+              bg: "from-primary to-accent",
+              cta: "Mulai Dengar",
+              cover: b.image_url
+            })))
+          }
+        } catch (e) {
+          console.warn("DB banners load failed:", e)
+        }
+
+        // Fetch latest songs
+        let dbLatest = []
+        try {
+          const { data: songs } = await supabase
+            .from('songs')
+            .select('*')
+            .eq('status', 'public')
+            .order('created_at', { ascending: false })
+            .limit(6)
+          dbLatest = songs || []
+        } catch (e) {
+          console.warn("DB latest songs load failed:", e)
+        }
+
+        // Fetch personalized recommendations
+        let dbRecs = []
+        try {
+          if (user) {
+            const { data: favs } = await supabase
+              .from('favorites')
+              .select('songs(*)')
+              .eq('user_id', user.id)
+              .limit(6)
+            
+            if (favs && favs.length > 0) {
+              dbRecs = favs.map(f => f.songs).filter(Boolean)
+            }
+          }
+          
+          if (dbRecs.length < 6) {
+            const { data: randSongs } = await supabase
+              .from('songs')
+              .select('*')
+              .eq('status', 'public')
+              .limit(10)
+            
+            const existingIds = new Set(dbRecs.map(s => s.id))
+            const additional = (randSongs || []).filter(s => !existingIds.has(s.id))
+            dbRecs = [...dbRecs, ...additional].slice(0, 6)
+          }
+        } catch (e) {
+          console.warn("DB recommendations load failed:", e)
+        }
+
         const res = await fetch(`${MUSIC_SERVICE_URL}/home`)
         if (!res.ok) throw new Error("Gagal mengambil data")
         const json = await res.json()
-        setData(json)
+        
+        setData({
+          ...json,
+          latestSongs: dbLatest.map(s => ({
+            id: s.id,
+            title: s.title,
+            artist: s.artist,
+            coverUrl: s.cover_url || "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&q=80",
+            audioUrl: s.audio_url,
+            is_youtube: s.is_youtube,
+            videoId: s.video_id
+          })),
+          recommendations: dbRecs.map(s => ({
+            id: s.id,
+            title: s.title,
+            artist: s.artist,
+            coverUrl: s.cover_url || "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&q=80",
+            audioUrl: s.audio_url,
+            is_youtube: s.is_youtube,
+            videoId: s.video_id
+          }))
+        })
       } catch (err) {
         console.warn("FastAPI home service unavailable, using rich local fallback.", err)
-        // Set beautiful local fallbacks to ensure app never crashes
+        
+        // Simple fallback mapping
         setData({
           trendingSongs: [
             { id: "J2X5mJ3HDYE", title: "Lagu Santai Malam", artist: "Senja Musik", coverUrl: "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&q=80" },
@@ -59,14 +151,16 @@ export default function Home({ onOpenAuth }) {
           popularAlbums: [
             { id: "album1", title: "Menari Dengan Bayangan", artist: "Hindia", coverUrl: "https://images.unsplash.com/photo-1487180142328-054b783fc471?w=300&q=80" },
             { id: "album2", title: "Walk the Talk", artist: "Pamungkas", coverUrl: "https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?w=300&q=80" }
-          ]
+          ],
+          latestSongs: [],
+          recommendations: []
         })
       } finally {
         setLoading(false)
       }
     }
     fetchHomeData()
-  }, [])
+  }, [user])
 
   const handlePlaySong = (song, songsList) => {
     if (!user) {
@@ -77,34 +171,39 @@ export default function Home({ onOpenAuth }) {
   }
 
   return (
-    <div className="pb-32 px-4 sm:px-6 pt-4 max-w-7xl mx-auto space-y-8">
+    <div className="pb-32 px-4 sm:px-6 pt-4 max-w-7xl mx-auto space-y-8 select-none">
       {/* 1. HERO BANNER SLIDESHOW */}
       {loading ? (
         <BannerSkeleton />
       ) : (
         <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-r from-primary/30 to-accent/20 border border-gray-border p-6 sm:p-8 md:p-10 flex flex-col justify-center min-h-[160px] sm:min-h-[220px]">
+          {banners[activeBanner].cover && (
+            <div className="absolute inset-0 z-0">
+              <img src={banners[activeBanner].cover} alt="" className="w-full h-full object-cover opacity-35" />
+            </div>
+          )}
           <div className="absolute top-0 right-0 w-1/2 h-full bg-gradient-to-l from-primary/10 to-transparent pointer-events-none"></div>
           <div className="max-w-md sm:max-w-lg z-10 space-y-2 sm:space-y-3">
             <span className="bg-primary/20 text-primary-light text-xs font-bold px-2.5 py-1 rounded-full uppercase tracking-widest border border-primary/30">
               Unggulan
             </span>
             <h2 className="text-xl sm:text-3xl font-extrabold tracking-tight text-white leading-tight">
-              {bannerItems[activeBanner].title}
+              {banners[activeBanner].title}
             </h2>
             <p className="text-xs sm:text-sm text-gray-text leading-relaxed">
-              {bannerItems[activeBanner].desc}
+              {banners[activeBanner].desc}
             </p>
             <button
-              onClick={() => user ? alert("Fitur Langganan Segera Hadir!") : onOpenAuth('register')}
+              onClick={() => user ? alert("Fitur Unggulan Aktif!") : onOpenAuth('register')}
               className="mt-2 bg-gradient-to-r from-primary to-accent text-white font-bold text-xs sm:text-sm px-5 py-2 sm:py-2.5 rounded-full shadow-lg shadow-primary/20 hover:brightness-110 active:scale-95 transition-all"
             >
-              {bannerItems[activeBanner].cta}
+              {banners[activeBanner].cta}
             </button>
           </div>
           
           {/* Banner Dot Indicators */}
-          <div className="absolute bottom-4 right-6 flex gap-2">
-            {bannerItems.map((_, idx) => (
+          <div className="absolute bottom-4 right-6 flex gap-2 z-10">
+            {banners.map((_, idx) => (
               <button
                 key={idx}
                 onClick={() => setActiveBanner(idx)}
@@ -138,13 +237,42 @@ export default function Home({ onOpenAuth }) {
         </div>
       </div>
 
-      {/* 3. TRENDING SONGS (2-column list on mobile, grid on desktop) */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
+      {/* 3. PERSONALIZED RECOMMENDATIONS (Rekomendasi Personal) */}
+      {data.recommendations && data.recommendations.length > 0 && (
+        <div className="space-y-4">
           <div className="flex items-center gap-2">
-            <Flame className="w-5 h-5 text-accent" />
-            <h3 className="text-lg font-bold text-white tracking-tight">Lagu Populer Hari Ini</h3>
+            <Sparkles className="w-5 h-5 text-primary-light" />
+            <h3 className="text-lg font-bold text-white tracking-tight font-sans">Rekomendasi Personal</h3>
           </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {data.recommendations.map((song, idx) => (
+              <motion.div
+                whileHover={{ scale: 1.01 }}
+                key={song.id || idx}
+                onClick={() => handlePlaySong(song, data.recommendations)}
+                className="flex items-center gap-3 p-2.5 rounded-xl bg-background-card border border-gray-border/50 hover:bg-background-hover cursor-pointer group transition-all"
+              >
+                <div className="relative w-12 h-12 rounded-lg overflow-hidden shrink-0">
+                  <img src={song.coverUrl} alt={song.title} className="w-full h-full object-cover" />
+                  <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Play className="w-5 h-5 text-white fill-white" />
+                  </div>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h4 className="text-sm font-semibold text-white truncate group-hover:text-primary-light transition-colors">{song.title}</h4>
+                  <p className="text-xs text-gray-text truncate mt-0.5">{song.artist}</p>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 4. TRENDING SONGS */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-2">
+          <Flame className="w-5 h-5 text-accent" />
+          <h3 className="text-lg font-bold text-white tracking-tight">Lagu Populer Hari Ini</h3>
         </div>
         
         {loading ? (
@@ -179,7 +307,38 @@ export default function Home({ onOpenAuth }) {
         )}
       </div>
 
-      {/* 4. POPULAR ARTISTS (Horizontal Scroll on Mobile, Grid on Desktop) */}
+      {/* 5. LATEST SONGS (Lagu Terbaru dari database) */}
+      {data.latestSongs && data.latestSongs.length > 0 && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Music className="w-5 h-5 text-primary" />
+            <h3 className="text-lg font-bold text-white tracking-tight">Lagu Terbaru</h3>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {data.latestSongs.map((song, idx) => (
+              <motion.div
+                whileHover={{ scale: 1.01 }}
+                key={song.id || idx}
+                onClick={() => handlePlaySong(song, data.latestSongs)}
+                className="flex items-center gap-3 p-2.5 rounded-xl bg-background-card border border-gray-border/50 hover:bg-background-hover cursor-pointer group transition-all"
+              >
+                <div className="relative w-12 h-12 rounded-lg overflow-hidden shrink-0">
+                  <img src={song.coverUrl} alt={song.title} className="w-full h-full object-cover" />
+                  <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Play className="w-5 h-5 text-white fill-white" />
+                  </div>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h4 className="text-sm font-semibold text-white truncate group-hover:text-primary-light transition-colors">{song.title}</h4>
+                  <p className="text-xs text-gray-text truncate mt-0.5">{song.artist}</p>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 6. POPULAR ARTISTS */}
       <div className="space-y-4">
         <div className="flex items-center gap-2">
           <User className="w-5 h-5 text-primary" />
@@ -214,7 +373,7 @@ export default function Home({ onOpenAuth }) {
         )}
       </div>
 
-      {/* 5. POPULAR ALBUMS */}
+      {/* 7. POPULAR ALBUMS */}
       <div className="space-y-4">
         <div className="flex items-center gap-2">
           <Disc className="w-5 h-5 text-accent" />

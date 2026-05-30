@@ -11,7 +11,8 @@
     { "source": "/home", "destination": "/api/home" },
     { "source": "/song/:videoId", "destination": "/api/song/:videoId" },
     { "source": "/artist/:artistId", "destination": "/api/artist/:artistId" },
-    { "source": "/playlist/:playlistId", "destination": "/api/playlist/:playlistId" }
+    { "source": "/playlist/:playlistId", "destination": "/api/playlist/:playlistId" },
+    { "source": "/lyrics", "destination": "/api/lyrics" }
   ],
   "headers": [
     {

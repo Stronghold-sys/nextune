@@ -959,17 +959,18 @@ export const usePlayerStore = create((set, get) => {
     },
 
     loadLyrics: async (song) => {
-      let dbSongId = null
+      if (!song) return
       
+      // === LANGKAH 1: Coba ambil dari Supabase DB (untuk lagu lokal yang sudah diupload liriknya) ===
+      let dbSongId = null
+
       if (song.id && song.id.length === 36) {
         dbSongId = song.id
       } else {
-        // If song.id is not a UUID, check if it's a YouTube video ID of length 11
         let ytId = song.video_id || song.videoId
         if (!ytId && song.id && song.id.length === 11) {
           ytId = song.id
         }
-
         if (ytId) {
           try {
             const { data: dbSong } = await supabase
@@ -977,41 +978,71 @@ export const usePlayerStore = create((set, get) => {
               .select('id')
               .eq('video_id', ytId)
               .maybeSingle()
-            
-            if (dbSong) {
-              dbSongId = dbSong.id
-            }
-          } catch (err) {
-            console.warn("Gagal mencocokkan video ID YouTube dengan lagu di DB:", err)
+            if (dbSong) dbSongId = dbSong.id
+          } catch {}
+        }
+      }
+
+      if (dbSongId) {
+        try {
+          const { data } = await supabase
+            .from('lyrics')
+            .select('content, is_synced')
+            .eq('song_id', dbSongId)
+            .maybeSingle()
+
+          if (data && data.content && data.content.trim()) {
+            const duration = get().duration || song.duration_seconds || 180
+            const parsed = parseLyricsContent(data.content, duration)
+            set({ lyrics: parsed, isLyricsSynced: data.is_synced || false })
+            return // Lirik dari DB berhasil dimuat
           }
+        } catch {
+          // Lanjut ke sumber berikutnya
         }
       }
 
-      if (!dbSongId) {
-        set({ lyrics: getFallbackLyrics(song), isLyricsSynced: false })
-        return
-      }
+      // === LANGKAH 2: Ambil dari Music Service (lrclib.net + lyrics.ovh) ===
+      const songTitle = song.title || ''
+      const songArtist = song.artist || ''
 
-      try {
-        const { data, error } = await supabase
-          .from('lyrics')
-          .select('content, is_synced')
-          .eq('song_id', dbSongId)
-          .maybeSingle()
-
-        if (error) throw error
-
-        if (data && data.content) {
-          const duration = get().duration || song.duration_seconds || 180
-          const parsed = parseLyricsContent(data.content, duration)
-          set({ lyrics: parsed, isLyricsSynced: data.is_synced || false })
-        } else {
-          set({ lyrics: getFallbackLyrics(song), isLyricsSynced: false })
+      if (songTitle && songArtist) {
+        try {
+          const durationParam = song.duration_seconds || get().duration || ''
+          const lyricsUrl = `${MUSIC_SERVICE_URL}/lyrics?title=${encodeURIComponent(songTitle)}&artist=${encodeURIComponent(songArtist)}${durationParam ? `&duration=${Math.round(durationParam)}` : ''}`
+          
+          const res = await fetch(lyricsUrl, { signal: AbortSignal.timeout(8000) })
+          
+          if (res.ok) {
+            const data = await res.json()
+            
+            // Jika ada lirik tersinkronisasi LRC
+            if (data.synced && data.lyrics) {
+              const duration = get().duration || song.duration_seconds || 180
+              const parsed = parseLyricsContent(data.lyrics, duration)
+              if (parsed.length > 0) {
+                set({ lyrics: parsed, isLyricsSynced: true })
+                return
+              }
+            }
+            
+            // Gunakan plain lyrics jika tidak ada LRC
+            if (data.plainLyrics && data.plainLyrics.trim()) {
+              const duration = get().duration || song.duration_seconds || 180
+              const parsed = parseLyricsContent(data.plainLyrics, duration)
+              if (parsed.length > 0) {
+                set({ lyrics: parsed, isLyricsSynced: false })
+                return
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('Gagal mengambil lirik dari music service:', err.message || err)
         }
-      } catch {
-        console.warn("Gagal memuat lirik dari database")
-        set({ lyrics: getFallbackLyrics(song), isLyricsSynced: false })
       }
+
+      // === LANGKAH 3: Fallback - tampilkan info lagu dasar ===
+      set({ lyrics: getFallbackLyrics(song), isLyricsSynced: false })
     },
 
     setAudioQuality: (quality) => {

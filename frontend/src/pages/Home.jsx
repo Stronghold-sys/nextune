@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Play, Flame, User, Disc, Compass, Music, Sparkles } from 'lucide-react'
 import { usePlayerStore } from '../store/usePlayerStore'
-import { useAuthStore } from '../store/useAuthStore'
+import { useAuthStore, checkIsPremium } from '../store/useAuthStore'
 import { supabase } from '../supabaseClient'
 import { CardSkeleton, SongSkeleton, BannerSkeleton } from '../components/Skeleton/SkeletonLoader'
 
@@ -11,7 +11,7 @@ const MUSIC_SERVICE_URL = import.meta.env.VITE_MUSIC_SERVICE_URL || 'http://loca
 const MOCK_GENRES = ["Pop", "Rock", "Hip Hop", "Jazz", "R&B", "K-Pop", "EDM", "Indie", "Akustik", "Dangdut"]
 
 export default function Home({ onOpenAuth }) {
-  const { user } = useAuthStore()
+  const { user, profile } = useAuthStore()
   const { playSong } = usePlayerStore()
   const [data, setData] = useState({ 
     trendingSongs: [], 
@@ -23,6 +23,9 @@ export default function Home({ onOpenAuth }) {
   const [loading, setLoading] = useState(true)
   const [selectedGenre, setSelectedGenre] = useState("Pop")
   const [activeBanner, setActiveBanner] = useState(0)
+
+  const [genreSongs, setGenreSongs] = useState([])
+  const [genreLoading, setGenreLoading] = useState(false)
   
   const [banners, setBanners] = useState([
     {
@@ -38,6 +41,18 @@ export default function Home({ onOpenAuth }) {
       cta: "Putar Sekarang"
     }
   ])
+
+  const isPremium = checkIsPremium(profile)
+
+  const displayBanners = banners.filter(b => {
+    // Jika user sudah premium, hilangkan banner "NexTune Premium"
+    if (isPremium && (b.title === "NexTune Premium" || b.cta === "Gabung Sekarang")) {
+      return false
+    }
+    return true
+  })
+
+  const currentBannerIdx = activeBanner >= displayBanners.length ? 0 : activeBanner
 
   useEffect(() => {
     const fetchHomeData = async () => {
@@ -162,6 +177,62 @@ export default function Home({ onOpenAuth }) {
     fetchHomeData()
   }, [user])
 
+  useEffect(() => {
+    const fetchGenreSongs = async () => {
+      if (!selectedGenre) return
+      setGenreLoading(true)
+      try {
+        // Coba cari dari DB songs yang memiliki genre tersebut
+        const { data: dbSongs } = await supabase
+          .from('songs')
+          .select('*')
+          .eq('status', 'public')
+          .eq('genre', selectedGenre)
+          .limit(6)
+
+        let results = dbSongs ? dbSongs.map(s => ({
+          id: s.id,
+          title: s.title,
+          artist: s.artist,
+          coverUrl: s.cover_url || "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&q=80",
+          audioUrl: s.audio_url,
+          is_youtube: s.is_youtube,
+          videoId: s.video_id,
+          genre: s.genre
+        })) : []
+
+        // Panggil API search dari YT Music untuk melengkapi data agar lebih aktual sesuai genre
+        const query = `${selectedGenre} lagu`
+        const res = await fetch(`${MUSIC_SERVICE_URL}/search?q=${encodeURIComponent(query)}&limit=10`)
+        if (res.ok) {
+          const ytResults = await res.json()
+          const ytSongs = (ytResults.results || ytResults || [])
+            .filter(s => s.id || s.videoId)
+            .map(s => ({
+              id: s.videoId || s.video_id || s.id,
+              title: s.title,
+              artist: s.artist || s.channel || 'YouTube Music',
+              coverUrl: s.coverUrl || s.thumbnail || s.cover_url || "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&q=80",
+              video_id: s.videoId || s.video_id || s.id,
+              videoId: s.videoId || s.video_id || s.id,
+              genre: selectedGenre,
+              is_youtube: true
+            }))
+          
+          const existingIds = new Set(results.map(r => r.videoId || r.id || r.video_id))
+          const additional = ytSongs.filter(s => !existingIds.has(s.videoId || s.id))
+          results = [...results, ...additional].slice(0, 6)
+        }
+        setGenreSongs(results)
+      } catch (err) {
+        console.warn("Gagal memuat lagu genre:", err)
+      } finally {
+        setGenreLoading(false)
+      }
+    }
+    fetchGenreSongs()
+  }, [selectedGenre])
+
   const handlePlaySong = (song, songsList) => {
     if (!user) {
       onOpenAuth('login')
@@ -170,16 +241,80 @@ export default function Home({ onOpenAuth }) {
     playSong(song, songsList)
   }
 
+  const handlePlayAlbum = async (album) => {
+    if (!user) {
+      onOpenAuth('login')
+      return
+    }
+    setLoading(true)
+    try {
+      const albumId = album.id || album.browseId
+      const res = await fetch(`${MUSIC_SERVICE_URL}/playlist/${albumId}`)
+      if (!res.ok) throw new Error("Gagal mengambil data album")
+      const data = await res.json()
+      if (data.tracks && data.tracks.length > 0) {
+        const mappedTracks = data.tracks.map(t => ({
+          id: t.id,
+          title: t.title,
+          artist: t.artist,
+          coverUrl: t.coverUrl || album.coverUrl || "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&q=80",
+          audioUrl: t.audioUrl,
+          is_youtube: true
+        }))
+        playSong(mappedTracks[0], mappedTracks)
+      } else {
+        alert("Album ini kosong atau tidak dapat dimuat.")
+      }
+    } catch (err) {
+      console.error(err)
+      alert("Gagal memutar album.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handlePlayArtist = async (artist) => {
+    if (!user) {
+      onOpenAuth('login')
+      return
+    }
+    setLoading(true)
+    try {
+      const artistId = artist.id || artist.browseId
+      const res = await fetch(`${MUSIC_SERVICE_URL}/artist/${artistId}`)
+      if (!res.ok) throw new Error("Gagal mengambil data artis")
+      const data = await res.json()
+      if (data.songs && data.songs.length > 0) {
+        const mappedTracks = data.songs.map(t => ({
+          id: t.id,
+          title: t.title,
+          artist: t.artist || artist.name,
+          coverUrl: t.coverUrl || artist.photoUrl || "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=300&q=80",
+          audioUrl: t.audioUrl,
+          is_youtube: true
+        }))
+        playSong(mappedTracks[0], mappedTracks)
+      } else {
+        alert("Tidak ada lagu populer yang tersedia untuk artis ini.")
+      }
+    } catch (err) {
+      console.error(err)
+      alert("Gagal memutar lagu artis.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
   return (
     <div className="pb-32 px-4 sm:px-6 pt-4 max-w-7xl mx-auto space-y-8 select-none">
       {/* 1. HERO BANNER SLIDESHOW */}
       {loading ? (
         <BannerSkeleton />
-      ) : (
+      ) : displayBanners.length === 0 ? null : (
         <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-r from-primary/30 to-accent/20 border border-gray-border p-6 sm:p-8 md:p-10 flex flex-col justify-center min-h-[160px] sm:min-h-[220px]">
-          {banners[activeBanner].cover && (
+          {displayBanners[currentBannerIdx]?.cover && (
             <div className="absolute inset-0 z-0">
-              <img src={banners[activeBanner].cover} alt="" className="w-full h-full object-cover opacity-35" />
+              <img src={displayBanners[currentBannerIdx].cover} alt="" className="w-full h-full object-cover opacity-35" />
             </div>
           )}
           <div className="absolute top-0 right-0 w-1/2 h-full bg-gradient-to-l from-primary/10 to-transparent pointer-events-none"></div>
@@ -188,14 +323,15 @@ export default function Home({ onOpenAuth }) {
               Unggulan
             </span>
             <h2 className="text-xl sm:text-3xl font-extrabold tracking-tight text-white leading-tight">
-              {banners[activeBanner].title}
+              {displayBanners[currentBannerIdx]?.title}
             </h2>
             <p className="text-xs sm:text-sm text-gray-text leading-relaxed">
-              {banners[activeBanner].desc}
+              {displayBanners[currentBannerIdx]?.desc}
             </p>
             <button
               onClick={() => {
-                const active = banners[activeBanner];
+                const active = displayBanners[currentBannerIdx];
+                if (!active) return;
                 if (active.title.toLowerCase().includes("premium") || active.cta === "Gabung Sekarang") {
                   if (!user) {
                     onOpenAuth('login')
@@ -208,25 +344,25 @@ export default function Home({ onOpenAuth }) {
               }}
               className="mt-2 bg-gradient-to-r from-primary to-accent text-white font-bold text-xs sm:text-sm px-5 py-2 sm:py-2.5 rounded-full shadow-lg shadow-primary/20 hover:brightness-110 active:scale-95 transition-all"
             >
-              {banners[activeBanner].cta}
+              {displayBanners[currentBannerIdx]?.cta}
             </button>
           </div>
           
           {/* Banner Dot Indicators */}
           <div className="absolute bottom-4 right-6 flex gap-2 z-10">
-            {banners.map((_, idx) => (
+            {displayBanners.map((_, idx) => (
               <button
                 key={idx}
                 onClick={() => setActiveBanner(idx)}
-                className={`w-2 h-2 rounded-full transition-all ${activeBanner === idx ? 'bg-primary w-4' : 'bg-gray-muted'}`}
-              ></button>
+                className={`w-2 h-2 rounded-full transition-all ${currentBannerIdx === idx ? 'bg-primary w-4' : 'bg-gray-muted'}`}
+              />
             ))}
           </div>
         </div>
       )}
 
       {/* 2. GENRE POPULER (CHIPS) */}
-      <div className="space-y-3">
+      <div className="space-y-4">
         <div className="flex items-center gap-2">
           <Compass className="w-5 h-5 text-primary" />
           <h3 className="text-lg font-bold text-white tracking-tight">Jelajahi Genre</h3>
@@ -246,6 +382,42 @@ export default function Home({ onOpenAuth }) {
             </button>
           ))}
         </div>
+
+        {/* Songs for selected genre */}
+        {genreLoading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {[1, 2, 3, 4, 5, 6].map((i) => <SongSkeleton key={i} />)}
+          </div>
+        ) : genreSongs.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {genreSongs.map((song, idx) => (
+              <motion.div
+                whileHover={{ scale: 1.01 }}
+                key={song.id || song.videoId || idx}
+                onClick={() => handlePlaySong(song, genreSongs)}
+                className="flex items-center gap-3 p-2.5 rounded-xl bg-background-card border border-gray-border/50 hover:bg-background-hover cursor-pointer group transition-all"
+              >
+                <div className="relative w-12 h-12 rounded-lg overflow-hidden shrink-0">
+                  <img src={song.coverUrl || song.cover_url} alt={song.title} className="w-full h-full object-cover" />
+                  <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Play className="w-5 h-5 text-white fill-white" />
+                  </div>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h4 className="text-sm font-semibold text-white truncate group-hover:text-primary-light transition-colors">{song.title}</h4>
+                  <p className="text-xs text-gray-text truncate mt-0.5">{song.artist}</p>
+                </div>
+                {song.genre && (
+                  <span className="text-[9px] bg-primary/10 text-primary-light border border-primary/20 px-2 py-0.5 rounded-full shrink-0 mr-2">
+                    {song.genre}
+                  </span>
+                )}
+              </motion.div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-gray-muted py-4">Tidak ada lagu yang ditemukan untuk genre ini.</p>
+        )}
       </div>
 
       {/* 3. PERSONALIZED RECOMMENDATIONS (Rekomendasi Personal) */}
@@ -370,6 +542,7 @@ export default function Home({ onOpenAuth }) {
             {data.popularArtists.map((artist, idx) => (
               <div
                 key={artist.id || idx}
+                onClick={() => handlePlayArtist(artist)}
                 className="flex-shrink-0 flex flex-col items-center text-center cursor-pointer group w-20 sm:w-auto"
               >
                 <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-full overflow-hidden mb-2 border border-gray-border group-hover:border-primary transition-all">
@@ -401,6 +574,7 @@ export default function Home({ onOpenAuth }) {
               <motion.div
                 whileHover={{ y: -4 }}
                 key={album.id || idx}
+                onClick={() => handlePlayAlbum(album)}
                 className="p-3 bg-background-card border border-gray-border/50 rounded-2xl hover:bg-background-hover hover:border-primary/20 cursor-pointer group transition-all"
               >
                 <div className="aspect-square w-full rounded-xl overflow-hidden mb-3 relative border border-gray-border/50">

@@ -399,10 +399,14 @@ async function fetchRecommendedSongs(currentSong, currentQueue, count = 5) {
   }
 
   try {
-    // Kumpulkan semua UUID yang sudah ada di antrean (hanya 36-char UUID)
-    const validUuidIds = currentQueue
+    // Kumpulkan semua UUID (36-char) dan video ID (11-char) yang sudah ada di antrean
+    const queueUuids = currentQueue
       .map(s => s.id)
       .filter(id => id && id.length === 36)
+
+    const queueVideoIds = currentQueue
+      .map(s => s.video_id || s.videoId || (s.id && s.id.length === 11 ? s.id : null))
+      .filter(Boolean)
 
     // === PRIORITAS 1: Cari lagu dari genre yang SAMA di Supabase ===
     if (targetGenre) {
@@ -412,8 +416,11 @@ async function fetchRecommendedSongs(currentSong, currentQueue, count = 5) {
         .eq('status', 'public')
         .eq('genre', targetGenre)
 
-      if (validUuidIds.length > 0) {
-        genreQuery = genreQuery.not('id', 'in', `(${validUuidIds.join(',')})`)
+      if (queueUuids.length > 0) {
+        genreQuery = genreQuery.not('id', 'in', `(${queueUuids.join(',')})`)
+      }
+      if (queueVideoIds.length > 0) {
+        genreQuery = genreQuery.not('video_id', 'in', `(${queueVideoIds.join(',')})`)
       }
 
       const { data: genreData } = await genreQuery.limit(count * 3)
@@ -426,8 +433,12 @@ async function fetchRecommendedSongs(currentSong, currentQueue, count = 5) {
     // === PRIORITAS 2: Tambah lagu acak dari Supabase jika masih kurang ===
     if (results.length < count) {
       const excludeIds = [
-        ...validUuidIds,
+        ...queueUuids,
         ...results.map(s => s.id).filter(id => id && id.length === 36)
+      ]
+      const excludeVideoIds = [
+        ...queueVideoIds,
+        ...results.map(s => s.video_id || s.videoId || (s.id && s.id.length === 11 ? s.id : null)).filter(Boolean)
       ]
 
       let randomQuery = supabase
@@ -437,6 +448,9 @@ async function fetchRecommendedSongs(currentSong, currentQueue, count = 5) {
 
       if (excludeIds.length > 0) {
         randomQuery = randomQuery.not('id', 'in', `(${excludeIds.join(',')})`)
+      }
+      if (excludeVideoIds.length > 0) {
+        randomQuery = randomQuery.not('video_id', 'in', `(${excludeVideoIds.join(',')})`)
       }
 
       const { data: randomData } = await randomQuery.limit((count - results.length) * 2)
@@ -448,11 +462,20 @@ async function fetchRecommendedSongs(currentSong, currentQueue, count = 5) {
 
     // === PRIORITAS 3: Jika Supabase kosong total, ambil semua lagu tanpa filter ===
     if (results.length === 0) {
-      const { data: allData } = await supabase
+      const excludeVideoIds = queueVideoIds
+      let allQuery = supabase
         .from('songs')
         .select('*')
         .eq('status', 'public')
-        .limit(count * 2)
+
+      if (queueUuids.length > 0) {
+        allQuery = allQuery.not('id', 'in', `(${queueUuids.join(',')})`)
+      }
+      if (excludeVideoIds.length > 0) {
+        allQuery = allQuery.not('video_id', 'in', `(${excludeVideoIds.join(',')})`)
+      }
+
+      const { data: allData } = await allQuery.limit(count * 2)
 
       if (allData && allData.length > 0) {
         const shuffled = [...allData].sort(() => Math.random() - 0.5)
@@ -471,24 +494,29 @@ async function fetchRecommendedSongs(currentSong, currentQueue, count = 5) {
 
       try {
         const res = await fetch(
-          `${MUSIC_SERVICE_URL}/search?q=${encodeURIComponent(searchQuery)}&limit=${count * 2}`
+          `${MUSIC_SERVICE_URL}/search?q=${encodeURIComponent(searchQuery)}&limit=${count * 3}`
         )
         if (res.ok) {
           const ytResults = await res.json()
           const ytSongs = (ytResults.results || ytResults || [])
             .filter(s => s.id || s.videoId)
+            .map(s => {
+              const videoId = s.videoId || s.video_id || s.id
+              return {
+                id: videoId,
+                title: s.title,
+                artist: s.artist || s.channel || 'YouTube Music',
+                cover_url: s.coverUrl || s.thumbnail || s.cover_url,
+                coverUrl: s.coverUrl || s.thumbnail || s.cover_url,
+                video_id: videoId,
+                videoId: videoId,
+                genre: genreQuery || null, // simpan genre agar riwayat + statistik akurat
+                is_youtube: true
+              }
+            })
+            // FILTER OUT ALREADY PLAYED / IN-QUEUE SONGS
+            .filter(s => !queueVideoIds.includes(s.videoId))
             .slice(0, count)
-            .map(s => ({
-              id: s.videoId || s.video_id || s.id,
-              title: s.title,
-              artist: s.artist || s.channel || 'YouTube Music',
-              cover_url: s.coverUrl || s.thumbnail || s.cover_url,
-              coverUrl: s.coverUrl || s.thumbnail || s.cover_url,
-              video_id: s.videoId || s.video_id || s.id,
-              videoId: s.videoId || s.video_id || s.id,
-              genre: genreQuery || null, // simpan genre agar riwayat + statistik akurat
-              is_youtube: true
-            }))
           results.push(...ytSongs)
         }
       } catch (ytErr) {
@@ -519,8 +547,9 @@ function parseLyricsContent(content, duration) {
       hasTimestamps = true
       const mins = parseInt(match[1], 10)
       const secs = parseInt(match[2], 10)
-      const ms = match[3] ? parseInt(match[3], 10) : 0
-      const time = mins * 60 + secs + (ms / 100)
+      const msStr = match[3] || '0'
+      const msVal = parseFloat('0.' + msStr)
+      const time = mins * 60 + secs + msVal
       const text = match[4].trim()
       parsed.push({ time, text })
     }

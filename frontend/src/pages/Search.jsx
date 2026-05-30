@@ -117,6 +117,70 @@ export default function Search({ onOpenAuth }) {
     playSong(song, list)
   }
 
+  const handlePlayAlbum = async (album) => {
+    if (!user) {
+      onOpenAuth('login')
+      return
+    }
+    setLoading(true)
+    try {
+      const albumId = album.id || album.browseId
+      const res = await fetch(`${MUSIC_SERVICE_URL}/playlist/${albumId}`)
+      if (!res.ok) throw new Error("Gagal mengambil data album")
+      const data = await res.json()
+      if (data.tracks && data.tracks.length > 0) {
+        const mappedTracks = data.tracks.map(t => ({
+          id: t.id,
+          title: t.title,
+          artist: t.artist,
+          coverUrl: t.coverUrl || album.coverUrl || "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300&q=80",
+          audioUrl: t.audioUrl,
+          is_youtube: true
+        }))
+        playSong(mappedTracks[0], mappedTracks)
+      } else {
+        alert("Album ini kosong atau tidak dapat dimuat.")
+      }
+    } catch (err) {
+      console.error(err)
+      alert("Gagal memutar album.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handlePlayArtist = async (artist) => {
+    if (!user) {
+      onOpenAuth('login')
+      return
+    }
+    setLoading(true)
+    try {
+      const artistId = artist.id || artist.browseId
+      const res = await fetch(`${MUSIC_SERVICE_URL}/artist/${artistId}`)
+      if (!res.ok) throw new Error("Gagal mengambil data artis")
+      const data = await res.json()
+      if (data.songs && data.songs.length > 0) {
+        const mappedTracks = data.songs.map(t => ({
+          id: t.id,
+          title: t.title,
+          artist: t.artist || artist.name,
+          coverUrl: t.coverUrl || artist.photoUrl || "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=300&q=80",
+          audioUrl: t.audioUrl,
+          is_youtube: true
+        }))
+        playSong(mappedTracks[0], mappedTracks)
+      } else {
+        alert("Tidak ada lagu populer yang tersedia untuk artis ini.")
+      }
+    } catch (err) {
+      console.error(err)
+      alert("Gagal memutar lagu artis.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const filteredResults = results.filter(item => {
     if (filter === "all") return true
     return item.type === filter
@@ -269,6 +333,7 @@ export default function Search({ onOpenAuth }) {
                 return (
                   <div
                     key={item.id || idx}
+                    onClick={() => item.type === 'artist' ? handlePlayArtist(item) : handlePlayAlbum(item)}
                     className="flex items-center justify-between p-2.5 rounded-xl bg-background-card border border-gray-border/50 hover:bg-background-hover cursor-pointer transition-all"
                   >
                     <div className="flex items-center gap-3">

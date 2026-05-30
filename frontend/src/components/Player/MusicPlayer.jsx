@@ -47,7 +47,20 @@ export default function MusicPlayer() {
 
   const activeLyricRef = useRef(null)
 
-  // Sync scroll for lyrics
+  const [currentLyricIdx, setCurrentLyricIdx] = useState(-1)
+
+  // Determine active lyric index
+  useEffect(() => {
+    if (!lyrics || lyrics.length === 0) return
+    const idx = lyrics.findIndex((line, idx) => {
+      return progress >= line.time && (idx === lyrics.length - 1 || progress < lyrics[idx + 1].time)
+    })
+    if (idx !== -1 && idx !== currentLyricIdx) {
+      setCurrentLyricIdx(idx)
+    }
+  }, [progress, lyrics, currentLyricIdx])
+
+  // Sync scroll ONLY when the active line changes
   useEffect(() => {
     if (activeLyricRef.current) {
       activeLyricRef.current.scrollIntoView({
@@ -55,7 +68,7 @@ export default function MusicPlayer() {
         block: 'center',
       })
     }
-  }, [progress])
+  }, [currentLyricIdx])
 
   // Listen to page changes to collapse mobile expanded player
   useEffect(() => {

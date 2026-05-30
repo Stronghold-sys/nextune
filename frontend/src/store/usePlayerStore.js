@@ -806,9 +806,35 @@ export const usePlayerStore = create((set, get) => {
     },
 
     loadLyrics: async (song) => {
-      const songId = song.id
+      let dbSongId = null
       
-      if (!songId) {
+      if (song.id && song.id.length === 36) {
+        dbSongId = song.id
+      } else {
+        // If song.id is not a UUID, check if it's a YouTube video ID of length 11
+        let ytId = song.video_id || song.videoId
+        if (!ytId && song.id && song.id.length === 11) {
+          ytId = song.id
+        }
+
+        if (ytId) {
+          try {
+            const { data: dbSong } = await supabase
+              .from('songs')
+              .select('id')
+              .eq('video_id', ytId)
+              .maybeSingle()
+            
+            if (dbSong) {
+              dbSongId = dbSong.id
+            }
+          } catch (err) {
+            console.warn("Gagal mencocokkan video ID YouTube dengan lagu di DB:", err)
+          }
+        }
+      }
+
+      if (!dbSongId) {
         set({ lyrics: getFallbackLyrics(song), isLyricsSynced: false })
         return
       }
@@ -817,7 +843,7 @@ export const usePlayerStore = create((set, get) => {
         const { data, error } = await supabase
           .from('lyrics')
           .select('content, is_synced')
-          .eq('song_id', songId)
+          .eq('song_id', dbSongId)
           .maybeSingle()
 
         if (error) throw error

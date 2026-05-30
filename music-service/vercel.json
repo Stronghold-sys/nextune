@@ -5,13 +5,21 @@
       "maxDuration": 30
     }
   },
+  "rewrites": [
+    { "source": "/search", "destination": "/api/search" },
+    { "source": "/stream/:videoId", "destination": "/api/stream/:videoId" },
+    { "source": "/home", "destination": "/api/home" },
+    { "source": "/song/:videoId", "destination": "/api/song/:videoId" },
+    { "source": "/artist/:artistId", "destination": "/api/artist/:artistId" },
+    { "source": "/playlist/:playlistId", "destination": "/api/playlist/:playlistId" }
+  ],
   "headers": [
     {
-      "source": "/api/(.*)",
+      "source": "/(.*)",
       "headers": [
         { "key": "Access-Control-Allow-Origin", "value": "*" },
-        { "key": "Access-Control-Allow-Methods", "value": "GET, OPTIONS" },
-        { "key": "Access-Control-Allow-Headers", "value": "Content-Type" }
+        { "key": "Access-Control-Allow-Methods", "value": "GET, OPTIONS, POST, PUT, DELETE, PATCH" },
+        { "key": "Access-Control-Allow-Headers", "value": "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version" }
       ]
     }
   ]

@@ -51,7 +51,7 @@ async function sendReceiptEmail({ email, username, packageName, amount, merchant
         <h2 style="color: #6366f1; text-align: center;">NexTune Premium</h2>
         <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
         <p>Halo, <strong>${username || 'Pengguna NexTune'}</strong>,</p>
-        <p>Terima kasih atas pembelian Anda! Pembayaran Anda melalui <strong>Duitku</strong> telah berhasil diverifikasi. Akun Anda kini aktif sebagai anggota <strong>Premium</strong>.</p>
+        <p>Terima kasih atas pembelian Anda! Pembayaran Anda telah berhasil diverifikasi. Akun Anda kini aktif sebagai anggota <strong>Premium</strong>.</p>
         
         <div style="background-color: #ffffff; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #6366f1;">
           <h3 style="margin-top: 0; color: #333;">Detail Transaksi:</h3>
@@ -183,7 +183,7 @@ module.exports = async (req, res) => {
         p_days: durationDays,
         p_package_name: productDetails || 'NexTune Premium',
         p_amount: price,
-        p_payment_method: paymentCode || 'Duitku',
+        p_payment_method: paymentCode || 'Payment Gateway',
         p_merchant_order_id: merchantOrderId
       });
 
@@ -200,10 +200,24 @@ module.exports = async (req, res) => {
           .eq('id', userId)
           .single();
 
-        if (!profileErr && userProfile && userProfile.email) {
+        let email = userProfile?.email;
+        let username = userProfile?.username || 'Pengguna NexTune';
+
+        if (!email) {
+          // Fallback: Ambil email dari auth.users menggunakan admin API
+          const { data: adminUserData, error: adminUserErr } = await supabase.auth.admin.getUserById(userId);
+          if (!adminUserErr && adminUserData?.user) {
+            email = adminUserData.user.email;
+            if (adminUserData.user.user_metadata?.full_name) {
+              username = adminUserData.user.user_metadata.full_name;
+            }
+          }
+        }
+
+        if (email) {
           await sendReceiptEmail({
-            email: userProfile.email,
-            username: userProfile.username || 'Pengguna NexTune',
+            email: email,
+            username: username,
             packageName: productDetails || 'NexTune Premium',
             amount: price,
             merchantOrderId: merchantOrderId,

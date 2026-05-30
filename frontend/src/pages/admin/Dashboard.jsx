@@ -9,6 +9,27 @@ import { useAuthStore, checkIsPremium } from '../../store/useAuthStore'
 import { supabase } from '../../supabaseClient'
 import { useToastStore } from '../../store/useToastStore'
 
+const formatToWIB = (dateString) => {
+  if (!dateString) return "Free Account 🎵";
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return "Format Tanggal Salah";
+  
+  if (date.getFullYear() >= 9999) {
+    return "Selamanya (Unlimited)";
+  }
+
+  const options = {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  };
+  return date.toLocaleString('id-ID', options) + ' WIB';
+}
+
 export default function Dashboard() {
   const { user, profile, login, logout } = useAuthStore()
   
@@ -231,26 +252,7 @@ export default function Dashboard() {
     })
   }
 
-  const formatToWIB = (dateString) => {
-    if (!dateString) return "Free Account 🎵";
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return "Format Tanggal Salah";
-    
-    if (date.getFullYear() >= 9999) {
-      return "Selamanya (Unlimited)";
-    }
 
-    const options = {
-      timeZone: 'Asia/Jakarta',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    };
-    return date.toLocaleString('id-ID', options) + ' WIB';
-  }
 
   const handleSaveUserPremium = async () => {
     if (!selectedUserForPremium) return
@@ -1291,7 +1293,7 @@ export default function Dashboard() {
                               <td className="p-4 font-semibold text-white">{userEmail}</td>
                               <td className="p-4 text-gray-text">{packageName}</td>
                               <td className="p-4 font-bold text-white">Rp {tx.amount.toLocaleString('id-ID')}</td>
-                              <td className="p-4 font-semibold text-gray-text">{tx.payment_method || 'Duitku'}</td>
+                              <td className="p-4 font-semibold text-gray-text">{tx.payment_method || 'Payment Gateway'}</td>
                               <td className="p-4 text-gray-text">{formatToWIB(tx.created_at)}</td>
                               <td className="p-4">
                                 <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase border ${

@@ -261,15 +261,21 @@ function initYouTubePlayer() {
           
           const store = usePlayerStore.getState()
           if (store && store.activePlayer === 'youtube' && store.currentYoutubeVideoId) {
-            usePlayerStore.setState({ isPlaying: false, loadingStream: false, currentYoutubeVideoId: null })
-            
             let errorMsg = "Gagal memutar lagu dari YouTube. Silakan coba lagi."
             if (e.data === 2) errorMsg = "Video ID tidak valid."
             if (e.data === 5) errorMsg = "Pemutaran tidak didukung di pemutar tersemat."
             if (e.data === 100) errorMsg = "Video tidak ditemukan atau telah dihapus."
             if (e.data === 101 || e.data === 150) errorMsg = "Pemilik video tidak mengizinkan pemutaran di aplikasi lain."
             
-            alert(errorMsg)
+            if ((e.data === 101 || e.data === 150 || e.data === 100) && store.currentSong) {
+              console.log("Mencoba mencari video alternatif karena pemutaran diblokir/tidak didukung...")
+              useToastStore.getState().showToast("Mencoba memutar versi alternatif karena restriksi YouTube...", "info", 4000)
+              store.playAlternativeYoutubeVideo(store.currentSong)
+              return
+            }
+            
+            usePlayerStore.setState({ isPlaying: false, loadingStream: false, currentYoutubeVideoId: null })
+            useToastStore.getState().showToast(errorMsg, 'error')
           }
         }
       }
@@ -726,7 +732,7 @@ export const usePlayerStore = create((set, get) => {
             if (!videoId) {
               console.error("YouTube videoId is missing for YouTube song:", song)
               set({ isPlaying: false, loadingStream: false, currentYoutubeVideoId: null })
-              alert("Video ID tidak ditemukan untuk lagu ini.")
+              useToastStore.getState().showToast("Video ID tidak ditemukan untuk lagu ini.", 'error')
               return
             }
             
@@ -766,7 +772,7 @@ export const usePlayerStore = create((set, get) => {
             const msg = error.message?.includes('bot') || error.message?.includes('Sign in')
               ? 'Lagu tidak dapat diputar saat ini karena deteksi bot YouTube. Coba lagi sebentar atau pilih lagu lain.'
               : 'Gagal memutar lagu. Silakan coba lagi.'
-            alert(msg)
+            useToastStore.getState().showToast(msg, 'error')
             return
           }
         }
@@ -777,7 +783,7 @@ export const usePlayerStore = create((set, get) => {
 
       if (!audioUrl) {
         set({ loadingStream: false })
-        alert("Audio URL tidak valid.")
+        useToastStore.getState().showToast("Audio URL tidak valid.", 'error')
         return
       }
 
@@ -804,6 +810,65 @@ export const usePlayerStore = create((set, get) => {
         console.error("Audio play error:", error)
         set({ isPlaying: false, loadingStream: false })
       }
+    },
+
+    playAlternativeYoutubeVideo: async (song) => {
+      const failedVideoIds = song._failedVideoIds || []
+      const currentVideoId = song.video_id || song.videoId || song.id
+      if (currentVideoId && !failedVideoIds.includes(currentVideoId)) {
+        failedVideoIds.push(currentVideoId)
+      }
+      
+      if (failedVideoIds.length > 3) {
+        set({ isPlaying: false, loadingStream: false, currentYoutubeVideoId: null })
+        useToastStore.getState().showToast("Gagal memutar lagu setelah mencoba beberapa alternatif video.", 'error')
+        return
+      }
+
+      set({ loadingStream: true })
+      
+      try {
+        const query = `${song.title} ${song.artist} audio`
+        console.log(`Mencari video alternatif untuk query: ${query}...`)
+        const res = await fetch(`${MUSIC_SERVICE_URL}/search?q=${encodeURIComponent(query)}&limit=5`)
+        if (res.ok) {
+          const searchData = await res.json()
+          const results = searchData.results || searchData || []
+          
+          const alternativeVideo = results.find(item => {
+            const vidId = item.videoId || item.video_id || item.id
+            return vidId && vidId.length === 11 && !failedVideoIds.includes(vidId)
+          })
+          
+          if (alternativeVideo) {
+            const newVideoId = alternativeVideo.videoId || alternativeVideo.video_id || alternativeVideo.id
+            console.log(`Menemukan video alternatif baru: ${newVideoId} (${alternativeVideo.title})`)
+            
+            const updatedSong = {
+              ...song,
+              video_id: newVideoId,
+              videoId: newVideoId,
+              id: song.is_youtube ? newVideoId : song.id,
+              _failedVideoIds: failedVideoIds
+            }
+            
+            const currentQueue = get().queue
+            const songIndex = currentQueue.findIndex(s => (s.id || s.videoId) === (song.id || song.videoId))
+            if (songIndex !== -1) {
+              currentQueue[songIndex] = updatedSong
+              set({ queue: [...currentQueue] })
+            }
+            
+            get().playSong(updatedSong)
+            return
+          }
+        }
+      } catch (err) {
+        console.error("Gagal mencari video alternatif:", err)
+      }
+      
+      set({ isPlaying: false, loadingStream: false, currentYoutubeVideoId: null })
+      useToastStore.getState().showToast("Pemilik video tidak mengizinkan pemutaran di aplikasi lain.", 'error')
     },
 
     saveToPlayHistory: async (song) => {

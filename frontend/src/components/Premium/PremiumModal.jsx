@@ -199,7 +199,7 @@ const loadDuitkuScript = (isSandbox) => {
       } else {
         // Sandbox fallback — Duitku API couldn't create a transaction
         // This happens when sandbox credentials aren't set up yet
-        alert('Tidak dapat terhubung ke Duitku sandbox. Pastikan Merchant Code & API Key sudah dikonfigurasi dengan benar di server.')
+        alert('Tidak dapat terhubung ke server pembayaran sandbox. Pastikan Merchant Code & API Key sudah dikonfigurasi dengan benar di server.')
         setPaymentStep('select_package')
       }
     } catch (error) {
@@ -292,7 +292,7 @@ const loadDuitkuScript = (isSandbox) => {
                 </h4>
                 <p className="text-[11px] text-gray-text mt-1">Dengarkan lagu penuh, kualitas Stereo/Hi-Fi & lirik synced tanpa batasan.</p>
                 <p className="text-[10px] text-gray-muted mt-2 bg-primary/5 border border-primary/20 rounded-lg p-2">
-                  💳 Pilih paket lalu klik <strong className="text-white">Bayar Sekarang</strong> — Duitku akan membuka halaman pembayaran dengan berbagai metode (QRIS, E-Wallet, Transfer Bank, dll).
+                  💳 Pilih paket lalu klik <strong className="text-white">Bayar Sekarang</strong> — Sistem akan membuka halaman pembayaran dengan berbagai metode (QRIS, E-Wallet, Transfer Bank, dll).
                 </p>
               </div>
 
@@ -334,7 +334,7 @@ const loadDuitkuScript = (isSandbox) => {
                         onClick={() => handleSelectPackage(pkg)}
                         className="w-full mt-4 bg-primary hover:bg-primary-hover text-white text-[10px] font-bold py-2 rounded-xl transition-all shadow-md shadow-primary/10 flex items-center justify-center gap-1.5"
                       >
-                        💳 Bayar Sekarang via Duitku
+                        💳 Bayar Sekarang
                       </button>
                     </div>
                   ))}
@@ -377,7 +377,7 @@ const loadDuitkuScript = (isSandbox) => {
                 <Crown className="w-5 h-5 text-primary-light absolute inset-0 m-auto animate-pulse" />
               </div>
               <div className="text-center space-y-1">
-                <h4 className="text-xs font-bold text-white">Menghubungi Duitku...</h4>
+                <h4 className="text-xs font-bold text-white">Menghubungi Server Pembayaran...</h4>
                 <p className="text-[10px] text-gray-text">Membuat sesi pembayaran, mohon tunggu sebentar.</p>
               </div>
             </div>
@@ -392,7 +392,7 @@ const loadDuitkuScript = (isSandbox) => {
               <div className="space-y-2">
                 <h4 className="text-sm font-bold text-white">Menunggu Konfirmasi Pembayaran</h4>
                 <p className="text-[11px] text-gray-text max-w-xs mx-auto leading-relaxed">
-                  Halaman pembayaran Duitku telah dibuka. Selesaikan pembayaran di sana. Halaman ini akan otomatis diperbarui setelah pembayaran berhasil.
+                  Halaman pembayaran telah dibuka. Selesaikan pembayaran di sana. Halaman ini akan otomatis diperbarui setelah pembayaran berhasil.
                 </p>
                 <p className="text-[10px] text-gray-muted mt-2 bg-background/50 border border-gray-border/30 rounded-xl px-4 py-2">
                   Paket: <strong className="text-white">{selectedPkg.name}</strong>
@@ -406,7 +406,7 @@ const loadDuitkuScript = (isSandbox) => {
                     if (checkIsPremium(updatedProfile)) {
                       setPaymentStep('success')
                     } else {
-                      alert('Pembayaran belum terdeteksi. Silakan tunggu beberapa saat atau periksa email konfirmasi dari Duitku.')
+                      alert('Pembayaran belum terdeteksi. Silakan tunggu beberapa saat atau periksa email konfirmasi Anda.')
                     }
                   }}
                   className="w-full bg-primary hover:bg-primary-hover text-white text-xs font-bold py-2.5 rounded-xl transition-all"

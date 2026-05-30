@@ -107,13 +107,13 @@ export const useAuthStore = create((set, get) => ({
     }
   },
 
-  verifyOtp: async (email, token) => {
+  verifyOtp: async (email, token, type = 'signup') => {
     set({ loading: true })
     try {
       const { data, error } = await supabase.auth.verifyOtp({
         email,
         token,
-        type: 'signup'
+        type
       })
       if (error) throw error
 
@@ -135,10 +135,10 @@ export const useAuthStore = create((set, get) => ({
     }
   },
 
-  resendOtp: async (email) => {
+  resendOtp: async (email, type = 'signup') => {
     try {
       const { error } = await supabase.auth.resend({
-        type: 'signup',
+        type,
         email
       })
       if (error) throw error

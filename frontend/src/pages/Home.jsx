@@ -197,7 +197,7 @@ export default function Home({ onOpenAuth }) {
       })) : []
 
       // Panggil API search dari YT Music untuk melengkapi data agar lebih aktual sesuai genre
-      const query = `${selectedGenre} lagu`
+      const query = `${selectedGenre} audio`
       const res = await fetch(`${MUSIC_SERVICE_URL}/search?q=${encodeURIComponent(query)}&limit=10`)
       if (res.ok) {
         const ytResults = await res.json()

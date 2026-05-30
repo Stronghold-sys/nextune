@@ -4,9 +4,10 @@ import { useAuthStore } from '../../store/useAuthStore'
 import { X, Eye, EyeOff, Lock, Mail, User, AlertCircle, RefreshCw } from 'lucide-react'
 
 export default function AuthModal({ isOpen, onClose, defaultMode = 'login', onAuthSuccess }) {
-  const { login, signUp, verifyOtp, resendOtp, sendResetPasswordEmail, loginWithGoogle } = useAuthStore()
+  const { login, signUp, verifyOtp, resendOtp, sendResetPasswordEmail, loginWithGoogle, updatePassword } = useAuthStore()
   
-  const [mode, setMode] = useState(defaultMode) // 'login' | 'register' | 'otp' | 'forgot'
+  const [mode, setMode] = useState(defaultMode) // 'login' | 'register' | 'otp' | 'forgot' | 'reset-password'
+  const [otpType, setOtpType] = useState('signup') // 'signup' | 'recovery'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -39,6 +40,7 @@ export default function AuthModal({ isOpen, onClose, defaultMode = 'login', onAu
         setServerError('')
         setSuccessMessage('')
         setOtp(['', '', '', '', '', ''])
+        setOtpType('signup')
       })
     }
   }, [isOpen, defaultMode])
@@ -128,6 +130,7 @@ export default function AuthModal({ isOpen, onClose, defaultMode = 'login', onAu
 
     if (result.success) {
       // Direct user to OTP page
+      setOtpType('signup')
       setMode('otp')
       setOtpTimer(300)
       setCanResendOtp(false)
@@ -166,12 +169,19 @@ export default function AuthModal({ isOpen, onClose, defaultMode = 'login', onAu
     }
 
     setLoading(true)
-    const result = await verifyOtp(email, token)
+    const result = await verifyOtp(email, token, otpType)
     setLoading(false)
 
     if (result.success) {
-      if (onAuthSuccess) onAuthSuccess()
-      onClose()
+      if (otpType === 'recovery') {
+        setMode('reset-password')
+        setPassword('')
+        setConfirmPassword('')
+        setSuccessMessage("OTP terverifikasi. Silakan tentukan password baru Anda.")
+      } else {
+        if (onAuthSuccess) onAuthSuccess()
+        onClose()
+      }
     } else {
       setServerError("Kode OTP salah atau kedaluwarsa. Silakan periksa kembali.")
     }
@@ -179,7 +189,7 @@ export default function AuthModal({ isOpen, onClose, defaultMode = 'login', onAu
 
   const handleResendOtp = async () => {
     setServerError('')
-    const result = await resendOtp(email)
+    const result = await resendOtp(email, otpType)
     if (result.success) {
       setOtpTimer(300)
       setCanResendOtp(false)
@@ -202,7 +212,43 @@ export default function AuthModal({ isOpen, onClose, defaultMode = 'login', onAu
     setLoading(false)
 
     if (result.success) {
-      setSuccessMessage("Tautan reset password telah dikirim ke email Anda. Berlaku selama 60 menit.")
+      setOtpType('recovery')
+      setMode('otp')
+      setOtpTimer(300)
+      setCanResendOtp(false)
+      setOtp(['', '', '', '', '', ''])
+      setSuccessMessage("Kode OTP verifikasi telah dikirim ke email Anda. Silakan masukkan di bawah.")
+    } else {
+      setServerError(result.error)
+    }
+  }
+
+  const handleResetPasswordSubmit = async (e) => {
+    e.preventDefault()
+    setServerError('')
+    const newErrors = {}
+
+    if (!validatePassword(password)) {
+      newErrors.password = "Password harus minimal 8 karakter, mengandung huruf besar dan angka"
+    }
+    if (password !== confirmPassword) {
+      newErrors.confirmPassword = "Konfirmasi password tidak cocok"
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors)
+      return
+    }
+
+    setLoading(true)
+    const result = await updatePassword(password)
+    setLoading(false)
+
+    if (result.success) {
+      setSuccessMessage("Password berhasil diubah! Silakan login menggunakan password baru Anda.")
+      setMode('login')
+      setPassword('')
+      setConfirmPassword('')
     } else {
       setServerError(result.error)
     }
@@ -252,12 +298,14 @@ export default function AuthModal({ isOpen, onClose, defaultMode = 'login', onAu
             {mode === 'register' && 'Buat Akun Baru'}
             {mode === 'otp' && 'Verifikasi Email'}
             {mode === 'forgot' && 'Lupa Password'}
+            {mode === 'reset-password' && 'Atur Ulang Password'}
           </h2>
           <p className="text-sm text-gray-text">
             {mode === 'login' && 'Temukan musik terpopuler dan terlaris secara global'}
             {mode === 'register' && 'Bergabung dan buat playlist musik pertamamu'}
-            {mode === 'otp' && `Masukkan kode OTP yang telah dikirim ke ${email}`}
+            {mode === 'otp' && (otpType === 'recovery' ? `Masukkan kode OTP pemulihan kata sandi yang telah dikirim ke ${email}` : `Masukkan kode OTP yang telah dikirim ke ${email}`)}
             {mode === 'forgot' && 'Masukkan email terdaftar untuk mengatur ulang password'}
+            {mode === 'reset-password' && 'Masukkan kata sandi baru Anda untuk akun NexTune'}
           </p>
         </div>
 
@@ -494,13 +542,64 @@ export default function AuthModal({ isOpen, onClose, defaultMode = 'login', onAu
               className="w-full bg-gradient-to-r from-primary to-accent text-white py-2.5 rounded-xl font-bold text-sm shadow-lg hover:brightness-110 active:scale-[0.99] transition-all disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2"
             >
               {loading && <RefreshCw className="w-4 h-4 animate-spin" />}
-              Kirim Link Reset
+              Kirim Kode Reset
+            </button>
+          </form>
+        )}
+
+        {/* 5. RESET PASSWORD FORM */}
+        {mode === 'reset-password' && (
+          <form onSubmit={handleResetPasswordSubmit} className="space-y-4">
+            <div>
+              <label className="block text-xs font-semibold text-gray-text uppercase tracking-wider mb-1.5">Password Baru</label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-3 w-5 h-5 text-gray-muted" />
+                <input
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Minimal 8 karakter (huruf besar + angka)"
+                  className="w-full bg-background/50 border border-gray-border rounded-xl pl-10 pr-10 py-2.5 text-sm text-white focus:outline-none focus:border-primary transition-colors"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-3 text-gray-muted hover:text-white"
+                >
+                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                </button>
+              </div>
+              {errors.password && <p className="text-accent text-[11px] mt-1">{errors.password}</p>}
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-gray-text uppercase tracking-wider mb-1.5">Konfirmasi Password Baru</label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-3 w-5 h-5 text-gray-muted" />
+                <input
+                  type={showPassword ? "text" : "password"}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Ulangi password baru"
+                  className="w-full bg-background/50 border border-gray-border rounded-xl pl-10 pr-4 py-2.5 text-sm text-white focus:outline-none focus:border-primary transition-colors"
+                />
+              </div>
+              {errors.confirmPassword && <p className="text-accent text-[11px] mt-1">{errors.confirmPassword}</p>}
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-gradient-to-r from-primary to-accent text-white py-2.5 rounded-xl font-bold text-sm shadow-lg hover:brightness-110 active:scale-[0.99] transition-all disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2"
+            >
+              {loading && <RefreshCw className="w-4 h-4 animate-spin" />}
+              Perbarui Password
             </button>
           </form>
         )}
 
         {/* Google OAuth & Link Toggle */}
-        {mode !== 'otp' && (
+        {mode !== 'otp' && mode !== 'reset-password' && (
           <div className="mt-6 space-y-4">
             <div className="relative flex py-2 items-center">
               <div className="flex-grow border-t border-gray-border"></div>

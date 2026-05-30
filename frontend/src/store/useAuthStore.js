@@ -205,5 +205,52 @@ export const useAuthStore = create((set, get) => ({
     } catch (error) {
       return { success: false, error: error.message }
     }
+  },
+
+  uploadAvatar: async (file) => {
+    const { user, profile } = get()
+    if (!user) return { success: false, error: 'User not logged in' }
+
+    try {
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        return { success: false, error: 'File harus berupa gambar (JPG, PNG, WEBP, dll)' }
+      }
+      // Validate file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        return { success: false, error: 'Ukuran file maksimal 5MB' }
+      }
+
+      // Generate unique filename based on user id
+      const ext = file.name.split('.').pop() || 'jpg'
+      const filePath = `avatars/${user.id}/avatar.${ext}`
+
+      // Upload to Supabase Storage (bucket: avatars)
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, file, { upsert: true, contentType: file.type })
+
+      if (uploadError) throw uploadError
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(filePath)
+
+      const publicUrl = urlData.publicUrl + '?t=' + Date.now() // cache bust
+
+      // Update profile with new avatar URL
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({ avatar_url: publicUrl })
+        .eq('id', user.id)
+
+      if (profileError) throw profileError
+
+      set({ profile: { ...profile, avatar_url: publicUrl } })
+      return { success: true, url: publicUrl }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
   }
 }))

@@ -1,17 +1,20 @@
-import { useState, useEffect } from 'react'
-import { User, Key, BarChart2, LogOut, CheckCircle2, AlertCircle, RefreshCw, Crown, Settings, Music, Clock, Play } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { User, Key, BarChart2, LogOut, CheckCircle2, AlertCircle, RefreshCw, Crown, Settings, Music, Clock, Play, Camera, Upload } from 'lucide-react'
 import { useAuthStore, checkIsPremium } from '../store/useAuthStore'
 import { usePlayerStore } from '../store/usePlayerStore'
 import { supabase } from '../supabaseClient'
 
 export default function Profile() {
-  const { user, profile, logout, updateProfile, updatePassword } = useAuthStore()
+  const { user, profile, logout, updateProfile, updatePassword, uploadAvatar } = useAuthStore()
   const { playSong } = usePlayerStore()
+  const fileInputRef = useRef(null)
 
   const [fullName, setFullName] = useState(profile?.full_name || "")
-  const [avatarUrl, setAvatarUrl] = useState(
-    profile?.avatar_url || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&q=80"
+  const [avatarPreview, setAvatarPreview] = useState(
+    profile?.avatar_url || null
   )
+  const [avatarFile, setAvatarFile] = useState(null)
+  const [uploadingAvatar, setUploadingAvatar] = useState(false)
   const [newPassword, setNewPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [loading, setLoading] = useState(false)
@@ -93,13 +96,45 @@ export default function Profile() {
     loadStats()
   }, [user])
 
+  const handleAvatarFileChange = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      setProfileMsg({ type: 'error', text: 'File harus berupa gambar (JPG, PNG, WEBP, dll)' })
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setProfileMsg({ type: 'error', text: 'Ukuran gambar maksimal 5MB' })
+      return
+    }
+    setAvatarFile(file)
+    setAvatarPreview(URL.createObjectURL(file))
+    setProfileMsg({ type: '', text: '' })
+  }
+
   const handleProfileSubmit = async (e) => {
     e.preventDefault()
     setProfileMsg({ type: '', text: '' })
     if (!fullName.trim()) return
 
     setLoading(true)
-    const result = await updateProfile(fullName, avatarUrl)
+
+    // Upload avatar if a new file was selected
+    let finalAvatarUrl = profile?.avatar_url || null
+    if (avatarFile) {
+      setUploadingAvatar(true)
+      const uploadResult = await uploadAvatar(avatarFile)
+      setUploadingAvatar(false)
+      if (!uploadResult.success) {
+        setProfileMsg({ type: 'error', text: 'Gagal upload foto: ' + uploadResult.error })
+        setLoading(false)
+        return
+      }
+      finalAvatarUrl = uploadResult.url
+      setAvatarFile(null)
+    }
+
+    const result = await updateProfile(fullName, finalAvatarUrl)
     setLoading(false)
 
     if (result.success) {
@@ -155,7 +190,7 @@ export default function Profile() {
       <div className="bg-background-card border border-gray-border/50 rounded-3xl p-6 flex flex-col sm:flex-row items-center gap-5 relative overflow-hidden">
         <div className="absolute -top-12 -left-12 w-24 h-24 bg-primary/20 rounded-full blur-2xl" />
 
-        <img src={avatarUrl} alt="Avatar" className="w-20 h-20 rounded-full object-cover border-2 border-primary shadow-lg shadow-primary/10 relative" />
+        <img src={avatarPreview || profile?.avatar_url || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&q=80"} alt="Avatar" className="w-20 h-20 rounded-full object-cover border-2 border-primary shadow-lg shadow-primary/10 relative" />
 
         <div className="flex-1 text-center sm:text-left relative space-y-1">
           <h2 className="text-xl font-bold text-white">{profile?.full_name || "Nama Pengguna"}</h2>
@@ -246,6 +281,45 @@ export default function Profile() {
           )}
 
           <form onSubmit={handleProfileSubmit} className="space-y-4">
+            {/* Avatar Upload */}
+            <div>
+              <label className="block text-xs font-semibold text-gray-text uppercase tracking-wider mb-2">Foto Profil</label>
+              <div className="flex items-center gap-4">
+                <div className="relative shrink-0">
+                  <img
+                    src={avatarPreview || profile?.avatar_url || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&q=80"}
+                    alt="Preview"
+                    className="w-16 h-16 rounded-full object-cover border-2 border-gray-border"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="absolute -bottom-1 -right-1 w-6 h-6 bg-primary rounded-full flex items-center justify-center shadow-md hover:bg-primary-hover transition-colors"
+                  >
+                    <Camera className="w-3 h-3 text-white" />
+                  </button>
+                </div>
+                <div className="flex-1">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex items-center gap-2 px-4 py-2 border border-gray-border rounded-xl text-xs text-gray-text hover:border-primary hover:text-white transition-colors w-full justify-center"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    {avatarFile ? avatarFile.name : 'Pilih Foto dari Perangkat'}
+                  </button>
+                  <p className="text-[10px] text-gray-muted mt-1 text-center">JPG, PNG, WEBP — Maks. 5MB</p>
+                </div>
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleAvatarFileChange}
+              />
+            </div>
+
             <div>
               <label className="block text-xs font-semibold text-gray-text uppercase tracking-wider mb-1.5">Nama Lengkap</label>
               <input
@@ -256,22 +330,13 @@ export default function Profile() {
                 required
               />
             </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-text uppercase tracking-wider mb-1.5">URL Foto Profil</label>
-              <input
-                type="text"
-                value={avatarUrl}
-                onChange={(e) => setAvatarUrl(e.target.value)}
-                className="w-full bg-background border border-gray-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-primary"
-              />
-            </div>
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || uploadingAvatar}
               className="w-full bg-primary hover:bg-primary-hover text-white py-2.5 rounded-xl text-xs font-bold transition-all disabled:opacity-50 flex items-center justify-center gap-2"
             >
-              {loading && <RefreshCw className="w-4 h-4 animate-spin" />}
-              Simpan Perubahan
+              {(loading || uploadingAvatar) && <RefreshCw className="w-4 h-4 animate-spin" />}
+              {uploadingAvatar ? 'Mengupload Foto...' : 'Simpan Perubahan'}
             </button>
           </form>
         </div>

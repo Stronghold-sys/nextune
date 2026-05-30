@@ -194,7 +194,18 @@ export default function Home({ onOpenAuth }) {
               {banners[activeBanner].desc}
             </p>
             <button
-              onClick={() => user ? alert("Fitur Unggulan Aktif!") : onOpenAuth('register')}
+              onClick={() => {
+                const active = banners[activeBanner];
+                if (active.title.toLowerCase().includes("premium") || active.cta === "Gabung Sekarang") {
+                  if (!user) {
+                    onOpenAuth('login')
+                  } else {
+                    window.dispatchEvent(new CustomEvent('open-premium-modal'))
+                  }
+                } else {
+                  user ? alert("Fitur Unggulan Aktif!") : onOpenAuth('register')
+                }
+              }}
               className="mt-2 bg-gradient-to-r from-primary to-accent text-white font-bold text-xs sm:text-sm px-5 py-2 sm:py-2.5 rounded-full shadow-lg shadow-primary/20 hover:brightness-110 active:scale-95 transition-all"
             >
               {banners[activeBanner].cta}

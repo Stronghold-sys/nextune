@@ -6,6 +6,75 @@ const MUSIC_SERVICE_URL = import.meta.env.VITE_MUSIC_SERVICE_URL || 'http://loca
 // Global HTML5 Audio instance for custom uploads
 let globalAudio = new Audio()
 
+// Web Audio API Global Instance Holders
+let audioCtx = null
+let sourceNode = null
+let filterNode = null
+let monoGainNode = null
+
+function initWebAudio() {
+  if (typeof window === 'undefined') return
+  if (audioCtx) return
+
+  const AudioContext = window.AudioContext || window.webkitAudioContext
+  if (!AudioContext) return
+
+  try {
+    audioCtx = new AudioContext()
+    globalAudio.crossOrigin = "anonymous"
+    sourceNode = audioCtx.createMediaElementSource(globalAudio)
+    
+    filterNode = audioCtx.createBiquadFilter()
+    filterNode.type = 'allpass'
+    
+    monoGainNode = audioCtx.createGain()
+    monoGainNode.channelCount = 1
+    monoGainNode.channelCountMode = 'clamped'
+  } catch (err) {
+    console.warn("Web Audio API not fully supported or restricted by browser:", err)
+  }
+}
+
+function updateAudioEffects(quality, mode) {
+  try {
+    initWebAudio()
+    if (!audioCtx || !sourceNode) return
+
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume()
+    }
+
+    try {
+      sourceNode.disconnect()
+      filterNode.disconnect()
+      monoGainNode.disconnect()
+    } catch (e) {}
+
+    // Apply Sound Mode Filter (EQ Character)
+    if (mode === 'low') {
+      filterNode.type = 'lowpass'
+      filterNode.frequency.value = 2500 // Warm sound
+    } else if (mode === 'high') {
+      filterNode.type = 'highpass'
+      filterNode.frequency.value = 800 // Bright sound
+    } else {
+      filterNode.type = 'allpass' // Hi-Fi / Original flat EQ
+    }
+
+    // Apply Audio Quality (Mono downmix vs Stereo bypass)
+    if (quality === 'mono') {
+      sourceNode.connect(filterNode)
+      filterNode.connect(monoGainNode)
+      monoGainNode.connect(audioCtx.destination)
+    } else {
+      sourceNode.connect(filterNode)
+      filterNode.connect(audioCtx.destination)
+    }
+  } catch (err) {
+    console.warn("Failed to apply Web Audio effects, falling back to direct speaker output:", err)
+  }
+}
+
 // YouTube Player state holders
 let ytPlayer = null
 let ytProgressInterval = null
@@ -203,6 +272,8 @@ export const usePlayerStore = create((set, get) => {
     isLyricsSynced: false,
     loadingStream: false,
     activePlayer: 'audio', // 'audio' | 'youtube'
+    audioQuality: localStorage.getItem('audio_quality') || 'mono',
+    soundMode: localStorage.getItem('sound_mode') || 'hifi',
 
     initAudio: () => {
       globalAudio.volume = get().volume
@@ -305,6 +376,9 @@ export const usePlayerStore = create((set, get) => {
           globalAudio.load()
           globalAudio.volume = get().volume
           globalAudio.playbackRate = get().playbackSpeed
+          
+          // Apply Web Audio quality & mode settings
+          updateAudioEffects(get().audioQuality, get().soundMode)
           
           await globalAudio.play()
           set({ isPlaying: true, loadingStream: false })
@@ -563,6 +637,18 @@ export const usePlayerStore = create((set, get) => {
       ]
 
       set({ lyrics: mockLyrics, isLyricsSynced: true })
+    },
+
+    setAudioQuality: (quality) => {
+      set({ audioQuality: quality })
+      localStorage.setItem('audio_quality', quality)
+      updateAudioEffects(quality, get().soundMode)
+    },
+
+    setSoundMode: (mode) => {
+      set({ soundMode: mode })
+      localStorage.setItem('sound_mode', mode)
+      updateAudioEffects(get().audioQuality, mode)
     }
   }
 })

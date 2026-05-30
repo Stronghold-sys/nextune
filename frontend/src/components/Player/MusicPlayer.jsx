@@ -1,15 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, Volume2, VolumeX, ListMusic, Clock, Gauge, ChevronUp, ChevronDown, Heart, Plus, ListCollapse } from 'lucide-react'
+import { Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, Volume2, VolumeX, ListMusic, Clock, Gauge, ChevronUp, ChevronDown, Heart, Plus, ListCollapse, Sliders } from 'lucide-react'
 import { usePlayerStore } from '../../store/usePlayerStore'
 import { useAuthStore } from '../../store/useAuthStore'
 import { supabase } from '../../supabaseClient'
 
 export default function MusicPlayer() {
-  const { user } = useAuthStore()
+  const { user, profile } = useAuthStore()
   const {
     currentSong, isPlaying, progress, duration, volume, playbackSpeed, repeatMode, shuffle, sleepTimer, lyrics, loadingStream,
-    togglePlay, next, prev, seek, setVolume, setPlaybackSpeed, setRepeatMode, setShuffle, setSleepTimer, queue, removeFromQueue
+    togglePlay, next, prev, seek, setVolume, setPlaybackSpeed, setRepeatMode, setShuffle, setSleepTimer, queue, removeFromQueue,
+    audioQuality, soundMode, setAudioQuality, setSoundMode
   } = usePlayerStore()
 
   const [isMobileExpanded, setIsMobileExpanded] = useState(false)
@@ -19,6 +20,7 @@ export default function MusicPlayer() {
   const [isFavorited, setIsFavorited] = useState(false)
   const [showSpeedMenu, setShowSpeedMenu] = useState(false)
   const [showSleepMenu, setShowSleepMenu] = useState(false)
+  const [showAudioMenu, setShowAudioMenu] = useState(false)
   const [showPlaylistMenu, setShowPlaylistMenu] = useState(false)
   const [userPlaylists, setUserPlaylists] = useState([])
 
@@ -310,7 +312,7 @@ export default function MusicPlayer() {
           {/* Playback Speed selector */}
           <div className="relative">
             <button 
-              onClick={() => setShowSpeedMenu(!showSpeedMenu)} 
+              onClick={() => { setShowSpeedMenu(!showSpeedMenu); setShowSleepMenu(false); setShowAudioMenu(false); }} 
               className="p-1 hover:text-white"
               title="Kecepatan Putar"
             >
@@ -334,7 +336,7 @@ export default function MusicPlayer() {
           {/* Sleep Timer selector */}
           <div className="relative">
             <button 
-              onClick={() => setShowSleepMenu(!showSleepMenu)} 
+              onClick={() => { setShowSleepMenu(!showSleepMenu); setShowSpeedMenu(false); setShowAudioMenu(false); }} 
               className="p-1 hover:text-white"
               title="Sleep Timer"
             >
@@ -358,6 +360,67 @@ export default function MusicPlayer() {
                     {mins} Menit
                   </button>
                 ))}
+              </div>
+            )}
+          </div>
+
+          {/* Audio Quality & Sound Mode popover */}
+          <div className="relative">
+            <button 
+              onClick={() => { setShowAudioMenu(!showAudioMenu); setShowSpeedMenu(false); setShowSleepMenu(false); }} 
+              className={`p-1 transition-colors ${showAudioMenu ? 'text-primary' : 'hover:text-white'}`}
+              title="Kualitas & Mode Suara"
+            >
+              <Sliders className="w-4 h-4" />
+            </button>
+            {showAudioMenu && (
+              <div 
+                className="absolute bottom-full right-0 mb-2 bg-background-card border border-gray-border rounded-xl p-3 shadow-2xl text-xs space-y-3 w-48 z-50 text-left"
+              >
+                <div className="space-y-1.5">
+                  <p className="text-[10px] text-gray-text font-bold uppercase tracking-wider pb-1 border-b border-gray-border/40">Kualitas Audio</p>
+                  <div className="flex flex-col gap-1">
+                    {[
+                      { id: 'mono', label: 'Mono', premium: false },
+                      { id: 'stereo', label: 'Stereo', premium: true },
+                      { id: 'hifi', label: 'Hi-Fi (Lossless)', premium: true }
+                    ].map(q => (
+                      <button
+                        key={q.id}
+                        onClick={() => handleSelectQuality(q.id, q.premium)}
+                        className={`flex items-center justify-between w-full text-left py-1 px-1.5 rounded hover:bg-background-hover ${audioQuality === q.id ? 'text-primary font-bold bg-primary/10' : 'text-white'}`}
+                      >
+                        <span>{q.label}</span>
+                        {q.premium && (
+                          <span className="text-[8px] bg-accent/20 text-accent border border-accent/30 font-bold px-1 rounded">PRO</span>
+                        )}
+                        {!q.premium && (
+                          <span className="text-[8px] text-gray-muted font-normal">GRATIS</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <p className="text-[10px] text-gray-text font-bold uppercase tracking-wider pb-1 border-b border-gray-border/40">Mode Suara</p>
+                  <div className="flex flex-col gap-1">
+                    {[
+                      { id: 'low', label: 'Low (Bass/Warm)', premium: true },
+                      { id: 'high', label: 'High (Treble/Bright)', premium: true },
+                      { id: 'hifi', label: 'Hi-Fi Dynamic', premium: true }
+                    ].map(m => (
+                      <button
+                        key={m.id}
+                        onClick={() => handleSelectMode(m.id)}
+                        className={`flex items-center justify-between w-full text-left py-1 px-1.5 rounded hover:bg-background-hover ${soundMode === m.id && isPremium ? 'text-primary font-bold bg-primary/10' : 'text-white'}`}
+                      >
+                        <span>{m.label}</span>
+                        <span className="text-[8px] bg-accent/20 text-accent border border-accent/30 font-bold px-1 rounded">PRO</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -537,13 +600,67 @@ export default function MusicPlayer() {
             </div>
 
             {/* Speed & sleep controls on mobile footer */}
-            <div className="flex justify-around items-center z-10 text-xs text-gray-text pt-2 border-t border-gray-border/20">
+            <div className="flex justify-around items-center z-10 text-xs text-gray-text pt-2 border-t border-gray-border/20 relative">
               <button onClick={() => setPlaybackSpeed(playbackSpeed === 1 ? 1.5 : playbackSpeed === 1.5 ? 2 : 1)}>
                 Kec: <span className="font-bold text-white">{playbackSpeed}x</span>
               </button>
               <button onClick={() => setSleepTimer(sleepTimer === null ? 15 : sleepTimer === 15 ? 30 : sleepTimer === 30 ? 60 : null)}>
                 Timer: <span className="font-bold text-white">{sleepTimer ? `${sleepTimer}m` : 'Mati'}</span>
               </button>
+              <button onClick={() => { setShowAudioMenu(!showAudioMenu); setShowPlaylistMenu(false); }} className={showAudioMenu ? "text-primary" : ""}>
+                Suara: <span className="font-bold text-white">{audioQuality === 'mono' ? 'Mono' : audioQuality === 'stereo' ? 'Stereo' : 'Hi-Fi'}</span>
+              </button>
+
+              {showAudioMenu && (
+                <div 
+                  className="absolute bottom-10 right-0 mb-2 bg-background-card border border-gray-border rounded-xl p-3 shadow-2xl text-xs space-y-3 w-52 z-50 text-left"
+                >
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] text-gray-text font-bold uppercase tracking-wider pb-1 border-b border-gray-border/40">Kualitas Audio</p>
+                    <div className="flex flex-col gap-1">
+                      {[
+                        { id: 'mono', label: 'Mono', premium: false },
+                        { id: 'stereo', label: 'Stereo', premium: true },
+                        { id: 'hifi', label: 'Hi-Fi (Lossless)', premium: true }
+                      ].map(q => (
+                        <button
+                          key={q.id}
+                          onClick={() => handleSelectQuality(q.id, q.premium)}
+                          className={`flex items-center justify-between w-full text-left py-1 px-1.5 rounded hover:bg-background-hover ${audioQuality === q.id ? 'text-primary font-bold bg-primary/10' : 'text-white'}`}
+                        >
+                          <span>{q.label}</span>
+                          {q.premium && (
+                            <span className="text-[8px] bg-accent/20 text-accent border border-accent/30 font-bold px-1 rounded">PRO</span>
+                          )}
+                          {!q.premium && (
+                            <span className="text-[8px] text-gray-muted font-normal">GRATIS</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] text-gray-text font-bold uppercase tracking-wider pb-1 border-b border-gray-border/40">Mode Suara</p>
+                    <div className="flex flex-col gap-1">
+                      {[
+                        { id: 'low', label: 'Low (Bass/Warm)', premium: true },
+                        { id: 'high', label: 'High (Treble/Bright)', premium: true },
+                        { id: 'hifi', label: 'Hi-Fi Dynamic', premium: true }
+                      ].map(m => (
+                        <button
+                          key={m.id}
+                          onClick={() => handleSelectMode(m.id)}
+                          className={`flex items-center justify-between w-full text-left py-1 px-1.5 rounded hover:bg-background-hover ${soundMode === m.id && isPremium ? 'text-primary font-bold bg-primary/10' : 'text-white'}`}
+                        >
+                          <span>{m.label}</span>
+                          <span className="text-[8px] bg-accent/20 text-accent border border-accent/30 font-bold px-1 rounded">PRO</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </motion.div>
         )}

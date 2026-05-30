@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { Crown, Check, CreditCard, X, QrCode, Wallet, Loader, Sparkles } from 'lucide-react'
+import { motion } from 'framer-motion'
+import { Crown, Check, CreditCard, X, QrCode, Loader, Sparkles, Ticket } from 'lucide-react'
 import { supabase } from '../../supabaseClient'
 import { useAuthStore } from '../../store/useAuthStore'
+
+const MUSIC_SERVICE_URL = import.meta.env.VITE_MUSIC_SERVICE_URL || 'http://localhost:8001'
 
 export default function PremiumModal({ isOpen, onClose }) {
   const { user, profile, checkUser } = useAuthStore()
@@ -11,9 +13,17 @@ export default function PremiumModal({ isOpen, onClose }) {
   const [loadingPackages, setLoadingPackages] = useState(true)
   const [selectedPkg, setSelectedPkg] = useState(null)
   
-  const [paymentStep, setPaymentStep] = useState('select_package') // 'select_package' | 'select_payment' | 'processing' | 'success'
+  const [paymentStep, setPaymentStep] = useState('select_package') // 'select_package' | 'select_payment' | 'duitku_checkout' | 'processing' | 'success'
   const [selectedPayment, setSelectedPayment] = useState(null)
-  const [processingPayment, setProcessingPayment] = useState(false)
+
+  // Voucher states
+  const [voucherCode, setVoucherCode] = useState('')
+  const [redeemingVoucher, setRedeemingVoucher] = useState(false)
+  const [voucherError, setVoucherError] = useState('')
+
+  // Duitku Inquiry Response states
+  const [duitkuTx, setDuitkuTx] = useState(null)
+  const [simulatingCallback, setSimulatingCallback] = useState(false)
 
   // Seed default packages if database is empty
   useEffect(() => {
@@ -89,12 +99,42 @@ export default function PremiumModal({ isOpen, onClose }) {
   // Reset steps on close or open
   useEffect(() => {
     if (isOpen) {
-      setPaymentStep('select_package')
-      setSelectedPkg(null)
-      setSelectedPayment(null)
-      setProcessingPayment(false)
+      const timer = setTimeout(() => {
+        setPaymentStep('select_package')
+        setSelectedPkg(null)
+        setSelectedPayment(null)
+        setVoucherCode('')
+        setVoucherError('')
+        setDuitkuTx(null)
+      }, 0)
+      return () => clearTimeout(timer)
     }
   }, [isOpen])
+
+  // Duitku success auto-detection polling
+  useEffect(() => {
+    let pollInterval = null;
+    if (paymentStep === 'duitku_checkout' && user) {
+      // Poll user profile every 3 seconds to auto-detect payment status
+      pollInterval = setInterval(async () => {
+        const prevPremiumUntil = profile?.premium_until;
+        await checkUser(); // Refetch profile
+        
+        const updatedProfile = useAuthStore.getState().profile;
+        if (updatedProfile?.premium_until && updatedProfile.premium_until !== prevPremiumUntil) {
+          const expDate = new Date(updatedProfile.premium_until);
+          if (expDate > new Date()) {
+            clearInterval(pollInterval);
+            setPaymentStep('success');
+          }
+        }
+      }, 3000);
+    }
+
+    return () => {
+      if (pollInterval) clearInterval(pollInterval);
+    };
+  }, [paymentStep, user]);
 
   if (!isOpen) return null
 
@@ -105,62 +145,150 @@ export default function PremiumModal({ isOpen, onClose }) {
 
   const handleConfirmPayment = async () => {
     if (!selectedPkg || !selectedPayment) return
-    
-    setPaymentStep('processing')
-    setProcessingPayment(true)
+    if (!user) {
+      alert("Silakan masuk akun terlebih dahulu.")
+      onClose()
+      return
+    }
 
-    // Simulate verification (1.5 seconds delay)
-    await new Promise(resolve => setTimeout(resolve, 1500))
+    setPaymentStep('processing')
 
     try {
-      if (!user) {
-        alert("Silakan masuk akun terlebih dahulu.")
-        onClose()
-        return
+      // Call Duitku inquiry endpoint
+      const response = await fetch(`${MUSIC_SERVICE_URL}/api/payment/create`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          userId: user.id,
+          packageId: selectedPkg.id,
+          paymentMethod: selectedPayment.id === 'qris' ? 'Q1' : selectedPayment.id === 'transfer' ? 'M1' : 'SP', // Q1 = QRIS, M1 = Mandiri VA, SP = ShopeePay
+          email: user.email
+        })
+      });
+
+      const resData = await response.json();
+
+      if (!response.ok || !resData.success) {
+        throw new Error(resData.error || 'Gagal menghubungi payment gateway Duitku.');
       }
 
-      // 1. Calculate duration days
-      const days = selectedPkg.duration_days || 30
-      const expDate = new Date()
-      expDate.setDate(expDate.getDate() + days)
-
-      // 2. Insert transaction
-      const newTransaction = {
-        user_id: user.id,
-        package_id: selectedPkg.id && !selectedPkg.id.startsWith('mock') ? selectedPkg.id : null,
-        amount: selectedPkg.price,
-        status: 'completed',
-        payment_method: selectedPayment.name,
-      }
-
-      await supabase.from('transactions').insert(newTransaction)
-
-      // 3. Update profiles table with premium_until date
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update({ premium_until: expDate.toISOString() })
-        .eq('id', user.id)
-
-      if (profileError) throw profileError
-
-      // 4. Reload profile
-      await checkUser()
-      
-      setPaymentStep('success')
+      setDuitkuTx(resData);
+      setPaymentStep('duitku_checkout');
     } catch (error) {
-      console.error("Error completing premium purchase:", error)
-      alert("Terjadi kesalahan saat memproses pembelian: " + error.message)
-      setPaymentStep('select_package')
+      console.error("Duitku Payment Error:", error);
+      alert("Terjadi kesalahan saat memproses pembayaran: " + error.message);
+      setPaymentStep('select_payment');
+    }
+  }
+
+  const handleSimulateCallback = async () => {
+    if (!duitkuTx || simulatingCallback) return;
+    setSimulatingCallback(true);
+
+    try {
+      // Call callback endpoint with simulated successful signature
+      const response = await fetch(`${MUSIC_SERVICE_URL}/api/payment/callback`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          merchantCode: 'DS18260',
+          amount: duitkuTx.amount,
+          merchantOrderId: duitkuTx.merchantOrderId,
+          productDetails: selectedPkg.name,
+          additionalParam: user.id,
+          paymentCode: selectedPayment.id === 'qris' ? 'Q1' : selectedPayment.id === 'transfer' ? 'M1' : 'SP',
+          resultCode: '00',
+          reference: duitkuTx.reference,
+          signature: 'mock_sandbox_bypass_signature'
+        })
+      });
+
+      const res = await response.json();
+      if (!response.ok || !res.success) {
+        throw new Error(res.error || 'Simulasi callback gagal.');
+      }
+
+      await checkUser(); // reload profile
+      setPaymentStep('success');
+    } catch (err) {
+      alert("Simulasi pembayaran gagal: " + err.message);
     } finally {
-      setProcessingPayment(false)
+      setSimulatingCallback(false);
+    }
+  }
+
+  const handleRedeemVoucher = async (e) => {
+    e.preventDefault();
+    if (!voucherCode.trim()) return;
+
+    setRedeemingVoucher(true);
+    setVoucherError('');
+
+    try {
+      const response = await fetch(`${MUSIC_SERVICE_URL}/api/payment/redeem-voucher`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          userId: user.id,
+          voucherCode: voucherCode.trim()
+        })
+      });
+
+      const resData = await response.json();
+
+      if (!response.ok || !resData.success) {
+        throw new Error(resData.error || 'Gagal klaim voucher.');
+      }
+
+      await checkUser(); // reload profile
+
+      // Set packaging details dynamically for success screen
+      setSelectedPkg({
+        name: `Redeem Voucher: ${voucherCode.trim()}`,
+        duration_days: resData.durationDays
+      });
+      
+      setPaymentStep('success');
+    } catch (err) {
+      setVoucherError(err.message);
+    } finally {
+      setRedeemingVoucher(false);
     }
   }
 
   const paymentMethods = [
-    { id: 'qris', name: 'QRIS / E-Wallet', icon: QrCode, desc: 'GoPay, OVO, Dana, LinkAja' },
-    { id: 'transfer', name: 'Transfer Bank', icon: CreditCard, desc: 'BCA, Mandiri, BNI, BRI Virtual Account' },
-    { id: 'gopay', name: 'GoPay Instan', icon: Wallet, desc: 'Bayar langsung dengan GoPay' }
+    { id: 'qris', name: 'QRIS / E-Wallet (Duitku)', icon: QrCode, desc: 'Instan via QRIS, GoPay, OVO, Dana' },
+    { id: 'transfer', name: 'Virtual Account (Duitku)', icon: CreditCard, desc: 'BCA, Mandiri, BNI, BRI, Permata VA' }
   ]
+
+  // Formatter for WIB datetime output
+  const formatToWIB = (dateString) => {
+    if (!dateString) return "";
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return "";
+    
+    // Far future date represents unlimited
+    if (date.getFullYear() >= 9999) {
+      return "Selamanya (Unlimited / Tanpa Batas)";
+    }
+
+    const options = {
+      timeZone: 'Asia/Jakarta',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    };
+    return date.toLocaleString('id-ID', options) + ' WIB';
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -170,7 +298,7 @@ export default function PremiumModal({ isOpen, onClose }) {
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         onClick={onClose}
-        className="fixed inset-0 bg-background/80 backdrop-blur-md"
+        className="fixed inset-0 bg-black/70 backdrop-blur-md"
       />
 
       {/* Modal Container */}
@@ -178,7 +306,7 @@ export default function PremiumModal({ isOpen, onClose }) {
         initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.95, opacity: 0 }}
-        className="relative w-full max-w-lg bg-background-card border border-primary/40 rounded-3xl p-6 shadow-2xl backdrop-blur-xl z-10 text-left overflow-hidden flex flex-col max-h-[85vh]"
+        className="relative w-full max-w-lg bg-background-card border border-primary/40 rounded-3xl p-6 shadow-2xl backdrop-blur-xl z-10 text-left overflow-hidden flex flex-col max-h-[90vh]"
       >
         {/* Glow Effects */}
         <div className="absolute -top-24 -right-24 w-48 h-48 bg-primary/20 rounded-full blur-3xl pointer-events-none"></div>
@@ -198,15 +326,15 @@ export default function PremiumModal({ isOpen, onClose }) {
         {/* Content Box */}
         <div className="flex-1 overflow-y-auto py-4 space-y-5 pr-1 no-scrollbar">
           
-          {/* STEP 1: SELECT PACKAGE */}
+          {/* STEP 1: SELECT PACKAGE & VOUCHER INPUT */}
           {paymentStep === 'select_package' && (
-            <div className="space-y-4">
-              <div className="text-center py-2">
+            <div className="space-y-5">
+              <div className="text-center py-1">
                 <h4 className="text-sm font-bold text-white flex items-center justify-center gap-1.5">
                   <Sparkles className="w-4 h-4 text-primary-light" />
                   Buka Akses Penuh Kualitas Studio
                 </h4>
-                <p className="text-[11px] text-gray-text mt-1">Dengarkan lagu tanpa batasan 30 detik & nikmati fitur-fitur premium lainnya.</p>
+                <p className="text-[11px] text-gray-text mt-1">Dengarkan lagu penuh, kualitas Stereo/Hi-Fi & lirik synced tanpa batasan.</p>
               </div>
 
               {loadingPackages ? (
@@ -260,6 +388,36 @@ export default function PremiumModal({ isOpen, onClose }) {
                   ))}
                 </div>
               )}
+
+              {/* VOUCHER REDEEM INPUT */}
+              <div className="bg-background/40 border border-gray-border/60 p-4 rounded-2xl space-y-3">
+                <h5 className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <Ticket className="w-4.5 h-4.5 text-primary-light" />
+                  Punya Kode Voucher?
+                </h5>
+                <p className="text-[10px] text-gray-text leading-relaxed">Masukkan kode voucher Anda di bawah ini untuk mengklaim akses premium gratis dari admin.</p>
+                
+                <form onSubmit={handleRedeemVoucher} className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Contoh: PREMIUMFREE7D"
+                    value={voucherCode}
+                    onChange={(e) => setVoucherCode(e.target.value.toUpperCase())}
+                    className="flex-1 bg-background-sidebar border border-gray-border rounded-xl px-3 py-2 text-xs text-white placeholder-gray-muted focus:outline-none focus:border-primary"
+                  />
+                  <button
+                    type="submit"
+                    disabled={redeemingVoucher || !voucherCode.trim()}
+                    className="bg-accent hover:bg-accent-hover disabled:opacity-40 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all flex items-center gap-1"
+                  >
+                    {redeemingVoucher ? <Loader className="w-3.5 h-3.5 animate-spin" /> : 'Gunakan'}
+                  </button>
+                </form>
+
+                {voucherError && (
+                  <p className="text-[10px] text-red-500 font-semibold">{voucherError}</p>
+                )}
+              </div>
             </div>
           )}
 
@@ -324,12 +482,77 @@ export default function PremiumModal({ isOpen, onClose }) {
                 disabled={!selectedPayment}
                 className="w-full bg-primary hover:bg-primary-hover disabled:opacity-40 disabled:hover:bg-primary text-white text-xs font-bold py-2.5 rounded-xl transition-all shadow-lg shadow-primary/10 mt-3"
               >
-                Konfirmasi & Bayar
+                Konfirmasi & Buat Tagihan Duitku
               </button>
             </div>
           )}
 
-          {/* STEP 3: PROCESSING PAYMENT */}
+          {/* STEP 3: DUITKU CUSTOM MERCHANT CHECKOUT PANEL */}
+          {paymentStep === 'duitku_checkout' && duitkuTx && selectedPkg && (
+            <div className="space-y-4">
+              <button 
+                onClick={() => setPaymentStep('select_payment')}
+                className="text-[10px] text-primary-light font-bold hover:underline mb-1 block"
+              >
+                ← Kembali ke Pemilihan Pembayaran
+              </button>
+
+              <div className="bg-background-card border border-primary/20 rounded-2xl p-4 space-y-4 text-center">
+                <div className="pb-3 border-b border-gray-border/30">
+                  <span className="text-[10px] bg-primary/20 text-primary-light px-2 py-0.5 rounded font-bold uppercase">Menunggu Pembayaran</span>
+                  <h4 className="text-sm font-bold text-white mt-2">Duitku Invoice: {duitkuTx.merchantOrderId}</h4>
+                  <p className="text-xs text-gray-text mt-0.5">Total Tagihan: <span className="font-extrabold text-white">Rp {duitkuTx.amount.toLocaleString('id-ID')}</span></p>
+                </div>
+
+                {/* QRIS Channel */}
+                {selectedPayment.id === 'qris' ? (
+                  <div className="flex flex-col items-center space-y-3">
+                    <p className="text-[11px] text-gray-text font-medium">Scan QR Code di bawah menggunakan aplikasi e-wallet Anda (GoPay, OVO, DANA, LinkAja, dll.)</p>
+                    
+                    {/* Simulated QRIS Code Card */}
+                    <div className="p-3 bg-white rounded-xl shadow-lg inline-block">
+                      {/* Standard QR Code SVG representation */}
+                      <svg className="w-40 h-40" viewBox="0 0 100 100" shapeRendering="crispEdges">
+                        <path fill="#000" d="M0 0h30v30H0zm0 70h30v30H0zm70 0h30v30H70zm70-70h30v30H70zM10 10v10h10V10zm0 70v10h10V80zm70 0v10h10V80zm0-70v10h10V10zm25 15h10v10H95zm-30 20h10v10H65zm-20 0h10v10H45zm-15 0h10v10H30zm30 15h10v10H60zm-20 0h10v10H40zm-15 0h10v10H25zm50 15h10v10H75zm-15 0h10v10H60zm-20 0h10v10H40zm-15 0h10v10H25z"/>
+                      </svg>
+                      <div className="mt-2 text-center text-[9px] font-black text-black uppercase tracking-widest border-t border-gray-border/20 pt-1.5">QRIS LUNAS - NEXTUNE</div>
+                    </div>
+                    
+                    <p className="text-[10px] text-gray-muted font-mono bg-background px-3 py-1.5 rounded-lg">Ref: {duitkuTx.reference}</p>
+                  </div>
+                ) : (
+                  // Virtual Account Channel
+                  <div className="space-y-3">
+                    <p className="text-[11px] text-gray-text">Silakan lakukan transfer bank ke nomor Virtual Account Mandiri / Bersama berikut:</p>
+                    <div className="p-4 bg-background border border-gray-border/60 rounded-xl space-y-2">
+                      <p className="text-[10px] text-gray-muted uppercase font-bold tracking-wider">Nomor Virtual Account</p>
+                      <p className="text-xl font-mono font-black text-primary-light tracking-wider select-all">{duitkuTx.vaNumber}</p>
+                      <p className="text-[10px] text-gray-text font-bold mt-1">Nama Rekening: <span className="text-white">NEXTUNE STREAMING</span></p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="pt-3 border-t border-gray-border/30 flex flex-col gap-2 items-center">
+                  <div className="flex items-center gap-1.5 text-[10px] text-gray-muted animate-pulse">
+                    <Loader className="w-3.5 h-3.5 animate-spin text-primary" />
+                    <span>Mendeteksi status pembayaran secara otomatis...</span>
+                  </div>
+
+                  {/* Sandbox Webhook Simulation Button */}
+                  <button
+                    onClick={handleSimulateCallback}
+                    disabled={simulatingCallback}
+                    className="w-full bg-accent/20 border border-accent/40 hover:bg-accent/30 text-accent text-[10px] font-bold py-2 rounded-xl transition-all flex items-center justify-center gap-1.5 mt-2"
+                  >
+                    {simulatingCallback ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                    Simulasikan Bayar Lunas (Webhook Duitku)
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* STEP 4: PROCESSING PAYMENT */}
           {paymentStep === 'processing' && (
             <div className="flex flex-col items-center justify-center py-16 space-y-4">
               <div className="relative">
@@ -337,32 +560,27 @@ export default function PremiumModal({ isOpen, onClose }) {
                 <Crown className="w-5 h-5 text-primary-light absolute inset-0 m-auto animate-pulse" />
               </div>
               <div className="text-center space-y-1">
-                <h4 className="text-xs font-bold text-white">Memproses Pembayaran...</h4>
+                <h4 className="text-xs font-bold text-white">Menghubungi Duitku...</h4>
                 <p className="text-[10px] text-gray-text">Mohon jangan menutup jendela ini atau memuat ulang halaman.</p>
               </div>
             </div>
           )}
 
-          {/* STEP 4: SUCCESS */}
+          {/* STEP 5: SUCCESS */}
           {paymentStep === 'success' && selectedPkg && (
             <div className="flex flex-col items-center justify-center py-12 space-y-6 text-center">
               <div className="w-14 h-14 bg-primary/10 border border-primary/20 rounded-full flex items-center justify-center text-primary-light shadow-lg shadow-primary/5">
                 <Check className="w-7 h-7 stroke-[3px] animate-bounce" />
               </div>
               <div className="space-y-2">
-                <h4 className="text-sm font-black text-white">Pembayaran Sukses! 🎉</h4>
+                <h4 className="text-sm font-black text-white">Aktivasi Sukses! 🎉</h4>
                 <p className="text-[11px] text-gray-text max-w-xs mx-auto leading-relaxed">
-                  Selamat! Anda kini berlangganan **{selectedPkg.name}**. Seluruh fitur premium dan akses pemutaran musik tanpa batasan 30 detik kini telah aktif.
+                  Selamat! Paket **{selectedPkg.name}** Anda telah aktif. Seluruh pembatasan akun dicabut. Kualitas audio Stereo, Hi-Fi, dan mode equalizer suara kini siap digunakan.
                 </p>
-                <div className="bg-background-sidebar/60 border border-gray-border/30 px-4 py-2 rounded-xl inline-block mt-3">
-                  <p className="text-[10px] text-gray-text">Masa Berlaku Premium Hingga:</p>
-                  <p className="text-xs font-bold text-white mt-0.5">
-                    {(() => {
-                      const days = selectedPkg.duration_days || 30
-                      const d = new Date()
-                      d.setDate(d.getDate() + days)
-                      return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })
-                    })()}
+                <div className="bg-background-sidebar/60 border border-gray-border/30 px-4 py-3 rounded-2xl inline-block mt-3 text-center space-y-1">
+                  <p className="text-[9px] text-gray-muted uppercase font-bold tracking-wider">Masa Berlaku Premium Hingga</p>
+                  <p className="text-xs font-black text-white">
+                    {profile?.premium_until ? formatToWIB(profile.premium_until) : 'Unlimited'}
                   </p>
                 </div>
               </div>

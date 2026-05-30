@@ -347,6 +347,11 @@ app.get("/stream/:videoId", async (req, res) => {
   }
 });
 
+// Payment Gateway & Voucher Routes
+app.post("/api/payment/create", require("./api/payment/create"));
+app.post("/api/payment/callback", require("./api/payment/callback"));
+app.post("/api/payment/redeem-voucher", require("./api/payment/redeem-voucher"));
+
 app.listen(PORT, () => {
   console.log(`NexTune Music Engine (Node.js) is running on port ${PORT}`);
 });

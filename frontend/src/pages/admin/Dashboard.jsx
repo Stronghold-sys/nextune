@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import { 
   LayoutDashboard, Users, Music, Disc, UserCheck, Image, Bell, CreditCard, 
   Settings, LogOut, ArrowUpRight, Search, Trash2, Plus, ShieldCheck, 
-  Mail, Lock, RefreshCw, FileText, Sliders, CheckSquare
+  Mail, Lock, RefreshCw, FileText, Sliders, CheckSquare, Ticket, Calendar
 } from 'lucide-react'
 import { useAuthStore } from '../../store/useAuthStore'
 import { supabase } from '../../supabaseClient'
@@ -20,6 +20,7 @@ export default function Dashboard() {
 
   // Navigation Panel Tab
   const [activeTab, setActiveTab] = useState("ringkasan") 
+  const [premiumSubTab, setPremiumSubTab] = useState("transaksi") 
   // 'ringkasan' | 'users' | 'songs' | 'albums' | 'artists' | 'playlists' | 'genres' | 'premium' | 'banners' | 'notifications' | 'settings'
 
   // Lists
@@ -31,6 +32,17 @@ export default function Dashboard() {
   const [genreList, setGenreList] = useState([])
   const [bannerList, setBannerList] = useState([])
   const [transactionList, setTransactionList] = useState([])
+  const [vouchersList, setVouchersList] = useState([])
+
+  // Voucher inputs
+  const [voucherCodeInput, setVoucherCodeInput] = useState("")
+  const [voucherDurationInput, setVoucherDurationInput] = useState("30")
+  const [isGeneratingVoucher, setIsGeneratingVoucher] = useState(false)
+
+  // Premium manual states
+  const [showPremiumEditModal, setShowPremiumEditModal] = useState(false)
+  const [selectedUserForPremium, setSelectedUserForPremium] = useState(null)
+  const [premiumExpiryDays, setPremiumExpiryDays] = useState("30")
 
   // Search & Filter
   const [userSearch, setUserSearch] = useState("")
@@ -135,6 +147,13 @@ export default function Dashboard() {
             { id: "tx-2", profiles: { email: "budi@gmail.com" }, premium_packages: { name: "Tahunan Premium" }, amount: 299000, status: "completed", date: "29 May 2026" }
           ])
         }
+
+        // 9. Fetch Vouchers
+        const { data: vList } = await supabase
+          .from('vouchers')
+          .select('*')
+          .order('created_at', { ascending: false })
+        if (isCurrent) setVouchersList(vList || [])
       } catch (e) {
         console.error("Error loading admin data: ", e)
       }
@@ -187,33 +206,124 @@ export default function Dashboard() {
     }
   }
 
-  const handleTogglePremium = async (userId, currentPremiumUntil) => {
-    try {
-      const isPremium = currentPremiumUntil && new Date(currentPremiumUntil) > new Date()
-      let nextPremiumUntil = null
+  const formatToWIB = (dateString) => {
+    if (!dateString) return "Free Account 🎵";
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return "Format Tanggal Salah";
+    
+    if (date.getFullYear() >= 9999) {
+      return "Selamanya (Unlimited)";
+    }
 
-      if (!isPremium) {
+    const options = {
+      timeZone: 'Asia/Jakarta',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    };
+    return date.toLocaleString('id-ID', options) + ' WIB';
+  }
+
+  const handleSaveUserPremium = async () => {
+    if (!selectedUserForPremium) return
+    
+    try {
+      let expiryDate = null
+      const days = parseInt(premiumExpiryDays)
+      
+      if (days === -1) {
+        expiryDate = '9999-12-31T23:59:59.000Z'
+      } else if (days > 0) {
         const d = new Date()
-        d.setDate(d.getDate() + 30)
-        nextPremiumUntil = d.toISOString()
+        d.setDate(d.getDate() + days)
+        expiryDate = d.toISOString()
       }
 
-      const { error } = await supabase
-        .from('profiles')
-        .update({ premium_until: nextPremiumUntil })
-        .eq('id', userId)
+      const { error } = await supabase.rpc('admin_update_user_subscription', {
+        p_user_id: selectedUserForPremium.id,
+        p_premium_until: expiryDate
+      })
 
-      if (error) throw error
+      if (error) {
+        // Fallback to direct update if RPC is not loaded yet
+        const { error: directErr } = await supabase
+          .from('profiles')
+          .update({ premium_until: expiryDate })
+          .eq('id', selectedUserForPremium.id)
+        
+        if (directErr) throw directErr
+      }
 
-      // Reload user list
+      // Refresh list
       const { data: users } = await supabase.from('profiles').select('*')
       setUserList(users || [])
 
-      alert(isPremium ? "Status premium pengguna berhasil dinonaktifkan." : "Status premium pengguna berhasil diaktifkan selama 30 hari.")
+      alert(`Status premium untuk ${selectedUserForPremium.email || selectedUserForPremium.username} berhasil diperbarui.`)
+      setShowPremiumEditModal(false)
+      setSelectedUserForPremium(null)
     } catch (err) {
-      console.error("Gagal mengubah status premium:", err)
-      alert("Gagal mengubah status premium: " + err.message)
+      console.error("Gagal menyimpan status premium:", err)
+      alert("Gagal menyimpan status premium: " + err.message)
     }
+  }
+
+  const handleCreateVoucher = async (e) => {
+    e.preventDefault()
+    if (!voucherCodeInput.trim()) return
+    setIsGeneratingVoucher(true)
+    try {
+      const code = voucherCodeInput.trim().toUpperCase()
+      const duration = parseInt(voucherDurationInput)
+      
+      const { data, error } = await supabase
+        .from('vouchers')
+        .insert({
+          code,
+          duration_days: duration,
+          is_active: true
+        })
+        .select()
+        .single()
+
+      if (error) throw error
+
+      setVouchersList([data, ...vouchersList])
+      setVoucherCodeInput("")
+      alert(`Voucher ${code} berhasil dibuat!`)
+    } catch (err) {
+      alert("Gagal membuat voucher: " + err.message)
+    } finally {
+      setIsGeneratingVoucher(false)
+    }
+  }
+
+  const handleDeleteVoucher = async (code) => {
+    if (!confirm(`Hapus voucher ${code}?`)) return
+    try {
+      const { error } = await supabase
+        .from('vouchers')
+        .delete()
+        .eq('code', code)
+
+      if (error) throw error
+
+      setVouchersList(vouchersList.filter(v => v.code !== code))
+      alert(`Voucher ${code} berhasil dihapus.`)
+    } catch (err) {
+      alert("Gagal menghapus voucher: " + err.message)
+    }
+  }
+
+  const generateRandomCode = () => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+    let result = 'NEXTUNE'
+    for (let i = 0; i < 8; i++) {
+      result += chars.charAt(Math.floor(Math.random() * chars.length))
+    }
+    setVoucherCodeInput(result)
   }
 
   // Song additions & modifications
@@ -640,18 +750,23 @@ export default function Dashboard() {
                                 {isUserPrem ? 'Premium 💎' : 'Free 🎵'}
                               </span>
                               {usr.premium_until && (
-                                <p className="text-[9px] text-gray-text">
-                                  Hingga: {new Date(usr.premium_until).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                <p className="text-[9px] text-gray-text max-w-[150px] whitespace-normal">
+                                  Hingga: {formatToWIB(usr.premium_until)}
                                 </p>
                               )}
                             </div>
                           </td>
                           <td className="p-4 text-center space-x-1 whitespace-nowrap">
                             <button
-                              onClick={() => handleTogglePremium(usr.id, usr.premium_until)}
+                              onClick={() => {
+                                setSelectedUserForPremium(usr)
+                                const isUserCurrentlyPrem = usr.premium_until && new Date(usr.premium_until) > new Date()
+                                setPremiumExpiryDays(isUserCurrentlyPrem ? "-1" : "30")
+                                setShowPremiumEditModal(true)
+                              }}
                               className="bg-primary/20 hover:bg-primary/30 border border-primary/20 px-2.5 py-1.5 rounded-lg text-[10px] font-bold text-primary-light transition-all"
                             >
-                              {isUserPrem ? 'Set Free' : 'Set Premium'}
+                              Ubah Paket
                             </button>
                             <button
                               onClick={() => handleToggleBlockUser(usr.id, usr.role)}
@@ -1067,66 +1182,282 @@ export default function Dashboard() {
         {/* 8. Langganan Premium tab */}
         {activeTab === "premium" && (
           <div className="space-y-6">
-            <h2 className="text-lg font-bold text-white">Manajemen Langganan Premium</h2>
-            <div className="bg-background-card border border-gray-border/40 p-5 rounded-2xl space-y-3">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-gray-text">Konfigurasi Harga Paket</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="p-3 bg-background border border-gray-border rounded-xl flex items-center justify-between">
-                  <div>
-                    <h4 className="text-xs font-bold text-white">Paket Bulanan</h4>
-                    <p className="text-[10px] text-gray-text mt-0.5">Rp 49.000 / 30 Hari</p>
-                  </div>
-                  <button onClick={() => alert("Harga Bulanan Premium diperbarui.")} className="bg-primary hover:bg-primary-hover text-white text-[10px] font-bold px-3 py-1 rounded-lg">Ubah Harga</button>
-                </div>
-                <div className="p-3 bg-background border border-gray-border rounded-xl flex items-center justify-between">
-                  <div>
-                    <h4 className="text-xs font-bold text-white">Paket Tahunan</h4>
-                    <p className="text-[10px] text-gray-text mt-0.5">Rp 299.000 / 365 Hari</p>
-                  </div>
-                  <button onClick={() => alert("Harga Tahunan Premium diperbarui.")} className="bg-primary hover:bg-primary-hover text-white text-[10px] font-bold px-3 py-1 rounded-lg">Ubah Harga</button>
-                </div>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <h2 className="text-lg font-bold text-white">Manajemen Langganan Premium</h2>
+              {/* Sub-tab navigation buttons */}
+              <div className="flex bg-background border border-gray-border/40 p-1 rounded-xl gap-1 shrink-0">
+                {[
+                  { id: "transaksi", label: "Transaksi" },
+                  { id: "vouchers", label: "Kelola Voucher" },
+                  { id: "users", label: "Langganan User" }
+                ].map(sub => (
+                  <button
+                    key={sub.id}
+                    onClick={() => setPremiumSubTab(sub.id)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      premiumSubTab === sub.id 
+                        ? 'bg-primary text-white shadow' 
+                        : 'text-gray-text hover:text-white'
+                    }`}
+                  >
+                    {sub.label}
+                  </button>
+                ))}
               </div>
             </div>
 
-            <div className="bg-background-card border border-gray-border/40 rounded-2xl overflow-hidden">
-              <div className="p-4 border-b border-gray-border/30 flex justify-between items-center">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-gray-text">Riwayat Transaksi</h3>
-                <button 
-                  onClick={() => alert("Mengunduh laporan keuangan berformat PDF...")}
-                  className="bg-primary/20 hover:bg-primary/30 text-primary-light border border-primary/20 px-3.5 py-1.5 rounded-xl text-[10px] font-bold flex items-center gap-1"
-                >
-                  <FileText className="w-3.5 h-3.5" /> Ekspor Laporan
-                </button>
+            {/* Sub-tab 1: TRANSAKSI */}
+            {premiumSubTab === "transaksi" && (
+              <div className="space-y-6">
+                <div className="bg-background-card border border-gray-border/40 p-5 rounded-2xl space-y-3">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-gray-text">Konfigurasi Harga Paket</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="p-3 bg-background border border-gray-border rounded-xl flex items-center justify-between">
+                      <div>
+                        <h4 className="text-xs font-bold text-white">Paket Bulanan</h4>
+                        <p className="text-[10px] text-gray-text mt-0.5">Rp 49.000 / 30 Hari</p>
+                      </div>
+                      <button onClick={() => alert("Harga Bulanan Premium diperbarui.")} className="bg-primary hover:bg-primary-hover text-white text-[10px] font-bold px-3 py-1 rounded-lg">Ubah Harga</button>
+                    </div>
+                    <div className="p-3 bg-background border border-gray-border rounded-xl flex items-center justify-between">
+                      <div>
+                        <h4 className="text-xs font-bold text-white">Paket Tahunan</h4>
+                        <p className="text-[10px] text-gray-text mt-0.5">Rp 299.000 / 365 Hari</p>
+                      </div>
+                      <button onClick={() => alert("Harga Tahunan Premium diperbarui.")} className="bg-primary hover:bg-primary-hover text-white text-[10px] font-bold px-3 py-1 rounded-lg">Ubah Harga</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-background-card border border-gray-border/40 rounded-2xl overflow-hidden">
+                  <div className="p-4 border-b border-gray-border/30 flex justify-between items-center">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-gray-text">Riwayat Transaksi</h3>
+                    <button 
+                      onClick={() => alert("Mengunduh laporan keuangan berformat PDF...")}
+                      className="bg-primary/20 hover:bg-primary/30 text-primary-light border border-primary/20 px-3.5 py-1.5 rounded-xl text-[10px] font-bold flex items-center gap-1"
+                    >
+                      <FileText className="w-3.5 h-3.5" /> Ekspor Laporan
+                    </button>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-background-sidebar border-b border-gray-border text-gray-text font-bold">
+                          <th className="p-4">Email Pengguna</th>
+                          <th className="p-4">Paket</th>
+                          <th className="p-4">Jumlah</th>
+                          <th className="p-4">Metode</th>
+                          <th className="p-4">Tanggal Pembelian (WIB)</th>
+                          <th className="p-4">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-border/40">
+                        {transactionList.map((tx, idx) => {
+                          const userEmail = tx.profiles?.email || tx.profiles?.username || tx.user_email || 'user@example.com'
+                          const packageName = tx.premium_packages?.name || tx.package || (tx.amount === 299000 ? 'Tahunan Premium' : 'Bulanan Premium')
+                          return (
+                            <tr key={tx.id || idx} className="hover:bg-background-hover transition-colors">
+                              <td className="p-4 font-semibold text-white">{userEmail}</td>
+                              <td className="p-4 text-gray-text">{packageName}</td>
+                              <td className="p-4 font-bold text-white">Rp {tx.amount.toLocaleString('id-ID')}</td>
+                              <td className="p-4 font-semibold text-gray-text">{tx.payment_method || 'Duitku'}</td>
+                              <td className="p-4 text-gray-text">{formatToWIB(tx.created_at)}</td>
+                              <td className="p-4">
+                                <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase border ${
+                                  tx.status === 'completed' 
+                                    ? 'bg-primary/10 border-primary text-primary-light' 
+                                    : tx.status === 'pending' 
+                                      ? 'bg-yellow-500/10 border-yellow-500 text-yellow-500' 
+                                      : 'bg-accent/10 border-accent text-accent'
+                                }`}>
+                                  {tx.status || 'completed'}
+                                </span>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
-              <table className="w-full text-left border-collapse text-xs">
-                <thead>
-                  <tr className="bg-background-sidebar border-b border-gray-border text-gray-text font-bold">
-                    <th className="p-4">Email Pengguna</th>
-                    <th className="p-4">Paket</th>
-                    <th className="p-4">Jumlah</th>
-                    <th className="p-4">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-border/40">
-                  {transactionList.map((tx, idx) => {
-                    const userEmail = tx.profiles?.email || tx.profiles?.username || tx.user_email || 'user@example.com'
-                    const packageName = tx.premium_packages?.name || tx.package || (tx.amount === 299000 ? 'Tahunan Premium' : 'Bulanan Premium')
-                    return (
-                      <tr key={tx.id || idx} className="hover:bg-background-hover transition-colors">
-                        <td className="p-4 font-semibold text-white">{userEmail}</td>
-                        <td className="p-4 text-gray-text">{packageName}</td>
-                        <td className="p-4 font-bold text-white">Rp {tx.amount.toLocaleString('id-ID')}</td>
-                        <td className="p-4">
-                          <span className="bg-primary/10 border border-primary/20 text-primary-light text-[9px] px-2 py-0.5 rounded-full font-bold uppercase">
-                            {tx.status || 'COMPLETED'}
-                          </span>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
+            )}
+
+            {/* Sub-tab 2: VOUCHERS */}
+            {premiumSubTab === "vouchers" && (
+              <div className="space-y-6">
+                {/* Buat Voucher Form */}
+                <form onSubmit={handleCreateVoucher} className="bg-background-card border border-gray-border/40 p-5 rounded-2xl space-y-4 text-left">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-gray-text flex items-center gap-1.5">
+                    <Ticket className="w-4.5 h-4.5 text-primary" />
+                    Buat Voucher Baru
+                  </h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-gray-text uppercase tracking-wider mb-1.5">Kode Voucher</label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          placeholder="KODE123"
+                          value={voucherCodeInput}
+                          onChange={(e) => setVoucherCodeInput(e.target.value.toUpperCase())}
+                          className="w-full bg-background border border-gray-border rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-primary"
+                          required
+                        />
+                        <button
+                          type="button"
+                          onClick={generateRandomCode}
+                          className="bg-background border border-gray-border hover:border-gray-text text-white text-[10px] px-3.5 py-2 rounded-xl transition-all font-bold shrink-0"
+                        >
+                          Acak
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-gray-text uppercase tracking-wider mb-1.5">Durasi Paket</label>
+                      <select
+                        value={voucherDurationInput}
+                        onChange={(e) => setVoucherDurationInput(e.target.value)}
+                        className="w-full bg-background border border-gray-border rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-primary h-[38px]"
+                      >
+                        <option value="7">7 Hari (1 Minggu Premium)</option>
+                        <option value="30">30 Hari (1 Bulan Premium)</option>
+                        <option value="365">365 Hari (1 Tahun Premium)</option>
+                        <option value="-1">Unlimited (Tanpa Batas Masa Aktif)</option>
+                      </select>
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={isGeneratingVoucher}
+                      className="bg-primary hover:bg-primary-hover disabled:opacity-50 text-white text-xs font-bold px-5 py-2.5 rounded-xl shadow-lg h-[38px]"
+                    >
+                      {isGeneratingVoucher ? 'Memproses...' : 'Buat & Rilis'}
+                    </button>
+                  </div>
+                </form>
+
+                {/* List of Vouchers */}
+                <div className="bg-background-card border border-gray-border/40 rounded-2xl overflow-hidden">
+                  <div className="p-4 border-b border-gray-border/30">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-gray-text">Daftar Voucher Yang Dirilis</h3>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-background-sidebar border-b border-gray-border text-gray-text font-bold">
+                          <th className="p-4">Kode Voucher</th>
+                          <th className="p-4">Durasi</th>
+                          <th className="p-4">Status</th>
+                          <th className="p-4">Digunakan Oleh</th>
+                          <th className="p-4">Tanggal Digunakan (WIB)</th>
+                          <th className="p-4">Tanggal Rilis (WIB)</th>
+                          <th className="p-4 text-center">Aksi</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-border/40">
+                        {vouchersList.length === 0 ? (
+                          <tr>
+                            <td colSpan="7" className="p-6 text-center text-gray-text">Belum ada voucher yang dirilis.</td>
+                          </tr>
+                        ) : (
+                          vouchersList.map((voc, idx) => {
+                            const redeemerUser = userList.find(u => u.id === voc.used_by)
+                            const redeemerEmail = redeemerUser ? (redeemerUser.email || redeemerUser.username) : voc.used_by
+                            return (
+                              <tr key={voc.code || idx} className="hover:bg-background-hover transition-colors">
+                                <td className="p-4 font-bold text-primary-light font-mono">{voc.code}</td>
+                                <td className="p-4 text-white">
+                                  {voc.duration_days === -1 ? 'Unlimited 💎' : `${voc.duration_days} Hari`}
+                                </td>
+                                <td className="p-4">
+                                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border ${
+                                    voc.is_active 
+                                      ? 'bg-green-500/10 border-green-500/30 text-green-500' 
+                                      : 'bg-gray-500/10 border-gray-border text-gray-muted'
+                                  }`}>
+                                    {voc.is_active ? 'Tersedia (Aktif)' : 'Sudah Diklaim'}
+                                  </span>
+                                </td>
+                                <td className="p-4 text-white font-semibold">{redeemerEmail || '-'}</td>
+                                <td className="p-4 text-gray-text">{voc.used_at ? formatToWIB(voc.used_at) : '-'}</td>
+                                <td className="p-4 text-gray-text">{formatToWIB(voc.created_at)}</td>
+                                <td className="p-4 text-center">
+                                  <button
+                                    onClick={() => handleDeleteVoucher(voc.code)}
+                                    className="text-accent hover:text-accent-hover p-1 rounded hover:bg-accent/10"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </td>
+                              </tr>
+                            )
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Sub-tab 3: LANGGANAN USER */}
+            {premiumSubTab === "users" && (
+              <div className="space-y-4">
+                <div className="bg-background-card border border-gray-border/40 p-5 rounded-2xl">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-gray-text mb-3">Status Premium Pengguna</h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-background-sidebar border-b border-gray-border text-gray-text font-bold">
+                          <th className="p-4">Pengguna</th>
+                          <th className="p-4">Status</th>
+                          <th className="p-4">Kedaluwarsa (WIB)</th>
+                          <th className="p-4 text-center">Aksi</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-border/40">
+                        {userList.map((usr, idx) => {
+                          const isUserPrem = usr.role === 'admin' || usr.role === 'super_admin' || (usr.premium_until && new Date(usr.premium_until) > new Date())
+                          return (
+                            <tr key={usr.id || idx} className="hover:bg-background-hover transition-colors">
+                              <td className="p-4">
+                                <p className="font-semibold text-white">{usr.full_name || usr.username}</p>
+                                <p className="text-[10px] text-gray-text">{usr.email || 'Tidak Diketahui'}</p>
+                              </td>
+                              <td className="p-4">
+                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold border uppercase ${
+                                  isUserPrem 
+                                    ? 'bg-primary/10 border-primary text-primary-light' 
+                                    : 'bg-background border-gray-border text-gray-text'
+                                }`}>
+                                  {isUserPrem ? 'Premium 💎' : 'Free 🎵'}
+                                </span>
+                              </td>
+                              <td className="p-4 text-gray-text max-w-[200px] whitespace-normal">
+                                {formatToWIB(usr.premium_until)}
+                              </td>
+                              <td className="p-4 text-center">
+                                <button
+                                  onClick={() => {
+                                    setSelectedUserForPremium(usr)
+                                    const isUserCurrentlyPrem = usr.premium_until && new Date(usr.premium_until) > new Date()
+                                    setPremiumExpiryDays(isUserCurrentlyPrem ? "-1" : "30")
+                                    setShowPremiumEditModal(true)
+                                  }}
+                                  className="bg-primary/20 hover:bg-primary/30 border border-primary/20 px-3 py-1.5 rounded-lg text-[10px] font-bold text-primary-light transition-all"
+                                >
+                                  Ubah Paket
+                                </button>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -1286,6 +1617,82 @@ export default function Dashboard() {
           </div>
         )}
       </main>
+
+      {/* Modal Edit Premium */}
+      <AnimatePresence>
+        {showPremiumEditModal && selectedUserForPremium && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => {
+                setShowPremiumEditModal(false)
+                setSelectedUserForPremium(null)
+              }}
+              className="fixed inset-0 bg-black/75 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="relative w-full max-w-md bg-background-card border border-primary/30 rounded-3xl p-6 shadow-2xl z-10 text-left"
+            >
+              <h3 className="text-base font-bold text-white mb-2">Edit Status Langganan</h3>
+              <p className="text-xs text-gray-text mb-4">
+                Mengubah paket untuk pengguna: <span className="font-semibold text-white">{selectedUserForPremium.email || selectedUserForPremium.username}</span>
+              </p>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-text uppercase tracking-wider mb-2">Pilih Paket / Masa Aktif</label>
+                  <select
+                    value={premiumExpiryDays}
+                    onChange={(e) => setPremiumExpiryDays(e.target.value)}
+                    className="w-full bg-background border border-gray-border rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-primary"
+                  >
+                    <option value="0">Free / Non-Premium (Batalkan)</option>
+                    <option value="7">7 Hari (1 Minggu Premium)</option>
+                    <option value="30">30 Hari (1 Bulan Premium)</option>
+                    <option value="365">365 Hari (1 Tahun Premium)</option>
+                    <option value="-1">Unlimited (Tanpa Batas / Selamanya)</option>
+                  </select>
+                </div>
+
+                <div className="p-3 bg-background/50 border border-gray-border rounded-xl">
+                  <p className="text-[10px] text-gray-muted uppercase font-bold tracking-wider">Masa Aktif Baru</p>
+                  <p className="text-xs font-bold text-primary-light mt-1">
+                    {premiumExpiryDays === "0" 
+                      ? "Free Account" 
+                      : premiumExpiryDays === "-1" 
+                        ? "Unlimited (Selamanya)" 
+                        : formatToWIB(new Date(Date.now() + parseInt(premiumExpiryDays) * 24 * 60 * 60 * 1000).toISOString())
+                    }
+                  </p>
+                </div>
+
+                <div className="flex gap-2 justify-end pt-2">
+                  <button
+                    onClick={() => {
+                      setShowPremiumEditModal(false)
+                      setSelectedUserForPremium(null)
+                    }}
+                    className="bg-background border border-gray-border text-white text-xs font-bold px-4 py-2 rounded-xl"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    onClick={handleSaveUserPremium}
+                    className="bg-primary hover:bg-primary-hover text-white text-xs font-bold px-5 py-2 rounded-xl shadow-lg"
+                  >
+                    Simpan Perubahan
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
     </div>
   )

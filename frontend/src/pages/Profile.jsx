@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { User, Key, BarChart2, LogOut, CheckCircle2, AlertCircle, RefreshCw, Crown, Settings } from 'lucide-react'
-import { useAuthStore } from '../store/useAuthStore'
+import { useAuthStore, checkIsPremium } from '../store/useAuthStore'
 
 export default function Profile() {
   const { user, profile, logout, updateProfile, updatePassword } = useAuthStore()
@@ -109,10 +109,7 @@ export default function Profile() {
 
       {/* STATUS LANGGANAN CARD */}
       {(() => {
-        const isPremium = profile && (
-          ['admin', 'super_admin', 'content_admin', 'moderation_admin', 'finance_admin'].includes(profile.role) ||
-          (profile.premium_until && new Date(profile.premium_until) > new Date())
-        )
+        const isPremium = checkIsPremium(profile)
         return (
           <div className="bg-background-card border border-gray-border/50 rounded-2xl p-5 sm:p-6 space-y-4 text-left">
             <h3 className="text-base font-bold text-white flex items-center gap-2">

@@ -5,7 +5,7 @@ import {
   Settings, LogOut, ArrowUpRight, Search, Trash2, Plus, ShieldCheck, 
   Mail, Lock, RefreshCw, FileText, Sliders, CheckSquare, Ticket
 } from 'lucide-react'
-import { useAuthStore } from '../../store/useAuthStore'
+import { useAuthStore, checkIsPremium } from '../../store/useAuthStore'
 import { supabase } from '../../supabaseClient'
 import { useToastStore } from '../../store/useToastStore'
 
@@ -733,7 +733,7 @@ export default function Dashboard() {
                   </thead>
                   <tbody className="divide-y divide-gray-border/40">
                     {userList.filter(u => (u.full_name || u.username || u.email || "").toLowerCase().includes(userSearch.toLowerCase())).map((usr, idx) => {
-                      const isUserPrem = usr.role === 'admin' || usr.role === 'super_admin' || (usr.premium_until && new Date(usr.premium_until) > new Date())
+                      const isUserPrem = checkIsPremium(usr)
                       return (
                         <tr key={usr.id || idx} className="hover:bg-background-hover transition-colors">
                           <td className="p-4">
@@ -773,7 +773,7 @@ export default function Dashboard() {
                             <button
                               onClick={() => {
                                 setSelectedUserForPremium(usr)
-                                const isUserCurrentlyPrem = usr.premium_until && new Date(usr.premium_until) > new Date()
+                                const isUserCurrentlyPrem = checkIsPremium(usr)
                                 setPremiumExpiryDays(isUserCurrentlyPrem ? "-1" : "30")
                                 setShowPremiumEditModal(true)
                               }}
@@ -1431,7 +1431,7 @@ export default function Dashboard() {
                       </thead>
                       <tbody className="divide-y divide-gray-border/40">
                         {userList.map((usr, idx) => {
-                          const isUserPrem = usr.role === 'admin' || usr.role === 'super_admin' || (usr.premium_until && new Date(usr.premium_until) > new Date())
+                          const isUserPrem = checkIsPremium(usr)
                           return (
                             <tr key={usr.id || idx} className="hover:bg-background-hover transition-colors">
                               <td className="p-4">
@@ -1454,7 +1454,7 @@ export default function Dashboard() {
                                 <button
                                   onClick={() => {
                                     setSelectedUserForPremium(usr)
-                                    const isUserCurrentlyPrem = usr.premium_until && new Date(usr.premium_until) > new Date()
+                                    const isUserCurrentlyPrem = checkIsPremium(usr)
                                     setPremiumExpiryDays(isUserCurrentlyPrem ? "-1" : "30")
                                     setShowPremiumEditModal(true)
                                   }}

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Play, Pause, SkipForward, SkipBack, Shuffle, Repeat, Volume2, VolumeX, ListMusic, Clock, Gauge, ChevronDown, Heart, Plus, ListCollapse, Sliders } from 'lucide-react'
 import { usePlayerStore } from '../../store/usePlayerStore'
-import { useAuthStore } from '../../store/useAuthStore'
+import { useAuthStore, checkIsPremium } from '../../store/useAuthStore'
 import { supabase } from '../../supabaseClient'
 
 export default function MusicPlayer() {
@@ -13,7 +13,7 @@ export default function MusicPlayer() {
     audioQuality, soundMode, setAudioQuality, setSoundMode
   } = usePlayerStore()
 
-  const isPremium = profile?.role === 'admin' || profile?.role === 'super_admin' || (profile?.premium_until && new Date(profile.premium_until) > new Date())
+  const isPremium = checkIsPremium(profile)
 
   const handleSelectQuality = (quality, premiumRequired) => {
     if (premiumRequired && !isPremium) {
@@ -422,7 +422,7 @@ export default function MusicPlayer() {
                         className={`flex items-center justify-between w-full text-left py-1 px-1.5 rounded hover:bg-background-hover ${audioQuality === q.id ? 'text-primary font-bold bg-primary/10' : 'text-white'}`}
                       >
                         <span>{q.label}</span>
-                        {q.premium && (
+                        {q.premium && !isPremium && (
                           <span className="text-[8px] bg-accent/20 text-accent border border-accent/30 font-bold px-1 rounded">PRO</span>
                         )}
                         {!q.premium && (
@@ -447,7 +447,7 @@ export default function MusicPlayer() {
                         className={`flex items-center justify-between w-full text-left py-1 px-1.5 rounded hover:bg-background-hover ${soundMode === m.id ? 'text-primary font-bold bg-primary/10' : 'text-white'}`}
                       >
                         <span>{m.label}</span>
-                        {m.premium && (
+                        {m.premium && !isPremium && (
                           <span className="text-[8px] bg-accent/20 text-accent border border-accent/30 font-bold px-1 rounded">PRO</span>
                         )}
                         {!m.premium && (
@@ -665,7 +665,7 @@ export default function MusicPlayer() {
                           className={`flex items-center justify-between w-full text-left py-1 px-1.5 rounded hover:bg-background-hover ${audioQuality === q.id ? 'text-primary font-bold bg-primary/10' : 'text-white'}`}
                         >
                           <span>{q.label}</span>
-                          {q.premium && (
+                          {q.premium && !isPremium && (
                             <span className="text-[8px] bg-accent/20 text-accent border border-accent/30 font-bold px-1 rounded">PRO</span>
                           )}
                           {!q.premium && (
@@ -690,7 +690,7 @@ export default function MusicPlayer() {
                           className={`flex items-center justify-between w-full text-left py-1 px-1.5 rounded hover:bg-background-hover ${soundMode === m.id ? 'text-primary font-bold bg-primary/10' : 'text-white'}`}
                         >
                           <span>{m.label}</span>
-                          {m.premium && (
+                          {m.premium && !isPremium && (
                             <span className="text-[8px] bg-accent/20 text-accent border border-accent/30 font-bold px-1 rounded">PRO</span>
                           )}
                           {!m.premium && (

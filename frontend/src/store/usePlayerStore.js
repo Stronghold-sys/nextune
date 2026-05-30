@@ -1,35 +1,48 @@
 import { create } from 'zustand'
-import { useAuthStore } from './useAuthStore'
+import { useAuthStore, checkIsPremium } from './useAuthStore'
+import { supabase } from '../supabaseClient'
+import { useToastStore } from './useToastStore'
 
 const MUSIC_SERVICE_URL = import.meta.env.VITE_MUSIC_SERVICE_URL || 'http://localhost:8001'
 
-// Global HTML5 Audio instance for custom uploads
-let globalAudio = new Audio()
+// Two separate Audio instances: cleanAudio for YouTube streams (no CORS effects),
+// and effectsAudio (with CORS anonymous and connected to Web Audio) for local tracks.
+let cleanAudio = new Audio()
+let effectsAudio = new Audio()
+effectsAudio.crossOrigin = "anonymous"
+
+// globalAudio points to whichever is currently active (cleanAudio by default)
+let globalAudio = cleanAudio
 
 // Web Audio API Global Instance Holders
 let audioCtx = null
 let sourceNode = null
 let filterNode = null
 let monoGainNode = null
+let isConnectedToWebAudio = false
 
 function initWebAudio() {
   if (typeof window === 'undefined') return
-  if (audioCtx) return
 
   const AudioContext = window.AudioContext || window.webkitAudioContext
   if (!AudioContext) return
 
   try {
-    audioCtx = new AudioContext()
-    globalAudio.crossOrigin = "anonymous"
-    sourceNode = audioCtx.createMediaElementSource(globalAudio)
-    
-    filterNode = audioCtx.createBiquadFilter()
-    filterNode.type = 'allpass'
-    
-    monoGainNode = audioCtx.createGain()
-    monoGainNode.channelCount = 1
-    monoGainNode.channelCountMode = 'explicit'
+    if (!audioCtx) {
+      audioCtx = new AudioContext()
+      
+      filterNode = audioCtx.createBiquadFilter()
+      filterNode.type = 'allpass'
+      
+      monoGainNode = audioCtx.createGain()
+      monoGainNode.channelCount = 1
+      monoGainNode.channelCountMode = 'explicit'
+    }
+
+    if (!isConnectedToWebAudio) {
+      sourceNode = audioCtx.createMediaElementSource(effectsAudio)
+      isConnectedToWebAudio = true
+    }
   } catch (err) {
     console.warn("Web Audio API not fully supported or restricted by browser:", err)
   }
@@ -76,6 +89,72 @@ function updateAudioEffects(quality, mode) {
     console.warn("Failed to apply Web Audio effects, falling back to direct speaker output:", err)
   }
 }
+
+function selectAudioElement(useEffects) {
+  const target = useEffects ? effectsAudio : cleanAudio
+  const other = useEffects ? cleanAudio : effectsAudio
+  
+  try {
+    other.pause()
+    other.src = ""
+  } catch (e) {
+    console.warn(e)
+  }
+  
+  globalAudio = target
+  
+  // Sync volume and speed from current store state if store has been initialized
+  try {
+    const store = usePlayerStore.getState()
+    if (store) {
+      target.volume = store.volume
+      target.playbackRate = store.playbackSpeed
+    }
+  } catch (e) {
+    // Ignore if store is not yet fully defined
+  }
+  
+  return target
+}
+
+function setupAudioElementListeners(audioElement) {
+  audioElement.addEventListener('timeupdate', () => {
+    // Only process if this is the currently active player
+    if (globalAudio !== audioElement) return
+
+    const profile = useAuthStore.getState().profile
+    const isPremium = checkIsPremium(profile)
+
+    if (!isPremium && audioElement.currentTime >= 30) {
+      audioElement.pause()
+      audioElement.currentTime = 0
+      usePlayerStore.setState({ isPlaying: false, progress: 0 })
+      window.dispatchEvent(new CustomEvent('premium-required', { detail: { reason: '30s_limit' } }))
+    } else {
+      usePlayerStore.setState({ progress: audioElement.currentTime })
+    }
+  })
+
+  audioElement.addEventListener('durationchange', () => {
+    if (globalAudio !== audioElement) return
+    usePlayerStore.setState({ duration: audioElement.duration || 0 })
+  })
+
+  audioElement.addEventListener('ended', () => {
+    if (globalAudio !== audioElement) return
+    const { repeatMode, next } = usePlayerStore.getState()
+    if (repeatMode === 'one') {
+      audioElement.currentTime = 0
+      audioElement.play().catch(err => console.log("Playback error:", err))
+    } else {
+      next()
+    }
+  })
+}
+
+// Initialize listeners on both instances
+setupAudioElementListeners(cleanAudio)
+setupAudioElementListeners(effectsAudio)
 
 // YouTube Player state holders
 let ytPlayer = null
@@ -131,6 +210,7 @@ function initYouTubePlayer() {
       videoId: '',
       playerVars: {
         'playsinline': 1,
+        'webkit-playsinline': 1,
         'controls': 0,
         'disablekb': 1,
         'fs': 0,
@@ -139,8 +219,17 @@ function initYouTubePlayer() {
         'iv_load_policy': 3
       },
       events: {
-        'onReady': () => {
+        'onReady': (event) => {
           isYtReady = true
+          try {
+            const iframe = event.target.getIframe()
+            if (iframe) {
+              iframe.setAttribute('playsinline', '1')
+              iframe.setAttribute('webkit-playsinline', '1')
+            }
+          } catch (e) {
+            console.warn("Could not set inline attributes on YT iframe:", e)
+          }
         },
         'onStateChange': (event) => {
           const store = usePlayerStore.getState()
@@ -190,10 +279,7 @@ function startYtProgressTimer() {
       const duration = ytPlayer.getDuration() || 0
       
       const profile = useAuthStore.getState().profile
-      const isPremium = profile && (
-        ['admin', 'super_admin', 'content_admin', 'moderation_admin', 'finance_admin'].includes(profile.role) ||
-        (profile.premium_until && new Date(profile.premium_until) > new Date())
-      )
+      const isPremium = checkIsPremium(profile)
 
       if (!isPremium && currentTime >= 30) {
         ytPlayer.pauseVideo()
@@ -216,39 +302,117 @@ function stopYtProgressTimer() {
   }
 }
 
+async function fetchRecommendedSong(currentSong, currentQueue) {
+  try {
+    const queueIds = currentQueue.map(s => s.id).filter(Boolean)
+    
+    // 1. Coba cari lagu dari genre yang sama
+    if (currentSong && currentSong.genre) {
+      let query = supabase
+        .from('songs')
+        .select('*')
+        .eq('status', 'public')
+        .eq('genre', currentSong.genre)
+      
+      if (queueIds.length > 0) {
+        query = query.not('id', 'in', `(${queueIds.join(',')})`)
+      }
+      
+      const { data } = await query.limit(5)
+      if (data && data.length > 0) {
+        return data[Math.floor(Math.random() * data.length)]
+      }
+    }
+    
+    // 2. Fallback: Cari lagu acak yang belum ada di antrean
+    let query = supabase
+      .from('songs')
+      .select('*')
+      .eq('status', 'public')
+      
+    if (queueIds.length > 0) {
+      const validUuidIds = queueIds.filter(id => id.length === 36)
+      if (validUuidIds.length > 0) {
+        query = query.not('id', 'in', `(${validUuidIds.join(',')})`)
+      }
+    }
+    
+    const { data } = await query.limit(10)
+    if (data && data.length > 0) {
+      return data[Math.floor(Math.random() * data.length)]
+    }
+
+    // 3. Last fallback: ambil lagu acak apa saja
+    const { data: fallbackData } = await supabase
+      .from('songs')
+      .select('*')
+      .eq('status', 'public')
+      .limit(5)
+      
+    if (fallbackData && fallbackData.length > 0) {
+      return fallbackData[Math.floor(Math.random() * fallbackData.length)]
+    }
+  } catch (err) {
+    console.error("Failed to fetch recommendation:", err)
+  }
+  return null
+}
+
+function parseLyricsContent(content, duration, song) {
+  if (!content) return []
+  
+  const lines = content.split('\n').map(l => l.trim()).filter(Boolean)
+  const lrcRegex = /^\[(\d+):(\d+)(?:\.(\d+))?\](.*)/
+  
+  const parsed = []
+  let hasTimestamps = false
+  
+  for (const line of lines) {
+    const match = line.match(lrcRegex)
+    if (match) {
+      hasTimestamps = true
+      const mins = parseInt(match[1], 10)
+      const secs = parseInt(match[2], 10)
+      const ms = match[3] ? parseInt(match[3], 10) : 0
+      const time = mins * 60 + secs + (ms / 100)
+      const text = match[4].trim()
+      parsed.push({ time, text })
+    }
+  }
+  
+  if (hasTimestamps) {
+    return parsed.sort((a, b) => a.time - b.time)
+  }
+  
+  // Jika tidak ada stempel waktu, bagi baris-baris lirik secara merata sepanjang durasi lagu
+  const totalDuration = duration || 180
+  const step = Math.max(3, totalDuration / (lines.length || 1))
+  
+  return lines.map((text, idx) => ({
+    time: idx * step,
+    text
+  }))
+}
+
+function getFallbackLyrics(song) {
+  const title = song.title || "Lagu"
+  const artist = song.artist || "Artis"
+  const genre = song.genre ? ` [Genre: ${song.genre}]` : ""
+  
+  return [
+    { time: 0, text: `[Musik - ${title} oleh ${artist}]` },
+    { time: 5, text: `Sedang memutar: ${title}` },
+    { time: 10, text: `Artis: ${artist}${genre}` },
+    { time: 20, text: "Lirik lengkap untuk lagu ini belum tersedia." },
+    { time: 30, text: "Hubungi admin atau unggah lirik di panel admin." },
+    { time: 45, text: "[Melodi Indah]" },
+    { time: 90, text: "Dengarkan suara berkualitas terbaik di NexTune." },
+    { time: 140, text: "Terima kasih telah mendengarkan." },
+    { time: 180, text: "[Selesai]" }
+  ]
+}
+
 export const usePlayerStore = create((set, get) => {
-  // Update state with audio element progress and enforce 30s limit for non-premium
-  globalAudio.addEventListener('timeupdate', () => {
-    const profile = useAuthStore.getState().profile
-    const isPremium = profile && (
-      ['admin', 'super_admin', 'content_admin', 'moderation_admin', 'finance_admin'].includes(profile.role) ||
-      (profile.premium_until && new Date(profile.premium_until) > new Date())
-    )
-
-    if (!isPremium && globalAudio.currentTime >= 30) {
-      globalAudio.pause()
-      globalAudio.currentTime = 0
-      set({ isPlaying: false, progress: 0 })
-      window.dispatchEvent(new CustomEvent('premium-required', { detail: { reason: '30s_limit' } }))
-    } else {
-      set({ progress: globalAudio.currentTime })
-    }
-  })
-
-  globalAudio.addEventListener('durationchange', () => {
-    set({ duration: globalAudio.duration || 0 })
-  })
-
-  globalAudio.addEventListener('ended', () => {
-    const { repeatMode, next } = get()
-    if (repeatMode === 'one') {
-      globalAudio.currentTime = 0
-      globalAudio.play().catch(err => console.log("Playback error:", err))
-    } else {
-      next()
-    }
-  })
-
   // Periodical check for Sleep Timer
   let sleepInterval = null
 
@@ -310,6 +474,7 @@ export const usePlayerStore = create((set, get) => {
 
       if (isYoutubeSong) {
         set({ activePlayer: 'audio' })
+        selectAudioElement(false) // YouTube streams use cleanAudio (no CORS effects)
         const videoId = song.video_id || song.videoId || song.id
         
         try {
@@ -355,6 +520,7 @@ export const usePlayerStore = create((set, get) => {
         }
       } else {
         set({ activePlayer: 'audio' })
+        selectAudioElement(true) // Local songs use effectsAudio (supports CORS effects)
       }
 
       if (!audioUrl) {
@@ -403,28 +569,44 @@ export const usePlayerStore = create((set, get) => {
       }
     },
 
-    next: () => {
-      const { queue, currentIndex, repeatMode, activePlayer } = get()
+    next: async () => {
+      const { queue, currentIndex, repeatMode, activePlayer, currentSong } = get()
       if (queue.length === 0) return
 
       let nextIndex = currentIndex + 1
       if (nextIndex >= queue.length) {
         if (repeatMode === 'all') {
           nextIndex = 0
+          set({ currentIndex: nextIndex })
+          get().playSong(queue[nextIndex])
         } else {
-          // stop playing
-          if (activePlayer === 'audio') {
-            globalAudio.pause()
-          } else if (activePlayer === 'youtube' && ytPlayer && typeof ytPlayer.pauseVideo === 'function') {
-            ytPlayer.pauseVideo()
+          // Antrean habis: Fitur Autoplay rekomendasi berkelanjutan
+          set({ loadingStream: true })
+          const recommended = await fetchRecommendedSong(currentSong, queue)
+          if (recommended) {
+            useToastStore.getState().showToast(`Autoplay: Memutar rekomendasi "${recommended.title}"`, "info")
+            const newQueue = [...queue, recommended]
+            set({
+              queue: newQueue,
+              originalQueue: [...get().originalQueue, recommended],
+              currentIndex: nextIndex,
+              loadingStream: false
+            })
+            get().playSong(recommended)
+          } else {
+            // Jika tidak ada lagu rekomendasi, berhenti memutar
+            if (activePlayer === 'audio') {
+              globalAudio.pause()
+            } else if (activePlayer === 'youtube' && ytPlayer && typeof ytPlayer.pauseVideo === 'function') {
+              ytPlayer.pauseVideo()
+            }
+            set({ isPlaying: false, progress: 0, loadingStream: false })
           }
-          set({ isPlaying: false, progress: 0 })
-          return
         }
+      } else {
+        set({ currentIndex: nextIndex })
+        get().playSong(queue[nextIndex])
       }
-
-      set({ currentIndex: nextIndex })
-      get().playSong(queue[nextIndex])
     },
 
     prev: () => {
@@ -454,10 +636,7 @@ export const usePlayerStore = create((set, get) => {
     seek: (time) => {
       const { activePlayer } = get()
       const profile = useAuthStore.getState().profile
-      const isPremium = profile && (
-        ['admin', 'super_admin', 'content_admin', 'moderation_admin', 'finance_admin'].includes(profile.role) ||
-        (profile.premium_until && new Date(profile.premium_until) > new Date())
-      )
+      const isPremium = checkIsPremium(profile)
       if (!isPremium && time >= 30) {
         if (activePlayer === 'audio') {
           globalAudio.currentTime = 29.9
@@ -492,10 +671,7 @@ export const usePlayerStore = create((set, get) => {
       const { activePlayer } = get()
       if (speed !== 1) {
         const profile = useAuthStore.getState().profile
-        const isPremium = profile && (
-          ['admin', 'super_admin', 'content_admin', 'moderation_admin', 'finance_admin'].includes(profile.role) ||
-          (profile.premium_until && new Date(profile.premium_until) > new Date())
-        )
+        const isPremium = checkIsPremium(profile)
         if (!isPremium) {
           window.dispatchEvent(new CustomEvent('premium-required', { detail: { reason: 'playback_speed' } }))
           return
@@ -578,10 +754,7 @@ export const usePlayerStore = create((set, get) => {
       }
 
       const profile = useAuthStore.getState().profile
-      const isPremium = profile && (
-        ['admin', 'super_admin', 'content_admin', 'moderation_admin', 'finance_admin'].includes(profile.role) ||
-        (profile.premium_until && new Date(profile.premium_until) > new Date())
-      )
+      const isPremium = checkIsPremium(profile)
       if (!isPremium) {
         window.dispatchEvent(new CustomEvent('premium-required', { detail: { reason: 'sleep_timer' } }))
         return
@@ -610,24 +783,33 @@ export const usePlayerStore = create((set, get) => {
     loadLyrics: async (song) => {
       const title = song.title || "Lagu"
       const artist = song.artist || "Artis"
+      const songId = song.id
       
-      const mockLyrics = [
-        { time: 0, text: `[Musik - ${title} oleh ${artist}]` },
-        { time: 5, text: "Selamat datang di NexTune Streaming" },
-        { time: 12, text: "Melodi indah mengalir tanpa henti" },
-        { time: 20, text: "Dalam malam sunyi yang bersemi" },
-        { time: 28, text: "Musik menghubungkan rasa kita bersama" },
-        { time: 38, text: "Terbang melintasi batas samudera" },
-        { time: 48, text: "Menikmati setiap ketukan dan irama" },
-        { time: 58, text: "NexTune membawa damai dalam jiwa" },
-        { time: 70, text: "[Melodi Gitar Interlude]" },
-        { time: 88, text: "Dan ketika lagu ini berakhir nanti" },
-        { time: 95, text: "Kenangan manis akan abadi di hati" },
-        { time: 105, text: "Terima kasih telah mendengarkan" },
-        { time: 115, text: "[Outro - NexTune]" }
-      ]
+      if (!songId) {
+        set({ lyrics: getFallbackLyrics(song), isLyricsSynced: false })
+        return
+      }
 
-      set({ lyrics: mockLyrics, isLyricsSynced: true })
+      try {
+        const { data, error } = await supabase
+          .from('lyrics')
+          .select('content, is_synced')
+          .eq('song_id', songId)
+          .maybeSingle()
+
+        if (error) throw error
+
+        if (data && data.content) {
+          const duration = get().duration || song.duration_seconds || 180
+          const parsed = parseLyricsContent(data.content, duration, song)
+          set({ lyrics: parsed, isLyricsSynced: data.is_synced || false })
+        } else {
+          set({ lyrics: getFallbackLyrics(song), isLyricsSynced: false })
+        }
+      } catch (err) {
+        console.warn("Gagal memuat lirik dari database:", err)
+        set({ lyrics: getFallbackLyrics(song), isLyricsSynced: false })
+      }
     },
 
     setAudioQuality: (quality) => {

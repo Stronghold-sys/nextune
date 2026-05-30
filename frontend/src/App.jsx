@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Compass, Search as SearchIcon, Library as LibIcon, User, ShieldAlert, Bell, X, Settings } from 'lucide-react'
-import { useAuthStore } from './store/useAuthStore'
+import { useAuthStore, checkIsPremium } from './store/useAuthStore'
 import { usePlayerStore } from './store/usePlayerStore'
 import { supabase } from './supabaseClient'
 
@@ -29,10 +29,7 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isPremiumModalOpen, setIsPremiumModalOpen] = useState(false)
 
-  const isPremium = profile && (
-    ['admin', 'super_admin', 'content_admin', 'moderation_admin', 'finance_admin'].includes(profile.role) ||
-    (profile.premium_until && new Date(profile.premium_until) > new Date())
-  )
+  const isPremium = checkIsPremium(profile)
 
   useEffect(() => {
     const handlePremiumRequired = () => {

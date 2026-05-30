@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Crown, Check, Loader, Sparkles, Ticket, X } from 'lucide-react'
 import { supabase } from '../../supabaseClient'
-import { useAuthStore } from '../../store/useAuthStore'
+import { useAuthStore, checkIsPremium } from '../../store/useAuthStore'
 
 const MUSIC_SERVICE_URL = import.meta.env.VITE_MUSIC_SERVICE_URL || 'http://localhost:8001'
 
@@ -403,7 +403,7 @@ const loadDuitkuScript = (isSandbox) => {
                   onClick={async () => {
                     await checkUser()
                     const updatedProfile = useAuthStore.getState().profile
-                    if (updatedProfile?.premium_until && new Date(updatedProfile.premium_until) > new Date()) {
+                    if (checkIsPremium(updatedProfile)) {
                       setPaymentStep('success')
                     } else {
                       alert('Pembayaran belum terdeteksi. Silakan tunggu beberapa saat atau periksa email konfirmasi dari Duitku.')

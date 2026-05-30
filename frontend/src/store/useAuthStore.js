@@ -1,6 +1,20 @@
 import { create } from 'zustand'
 import { supabase } from '../supabaseClient'
 
+export const checkIsPremium = (profile) => {
+  if (!profile) return false
+  const isSpecialRole = ['admin', 'super_admin', 'content_admin', 'moderation_admin', 'finance_admin', 'premium'].includes(profile.role)
+  if (isSpecialRole) return true
+  if (profile.premium_until) {
+    const timeStr = typeof profile.premium_until === 'string'
+      ? profile.premium_until.replace(' ', 'T')
+      : profile.premium_until
+    const time = Date.parse(timeStr)
+    return !isNaN(time) && time > Date.now()
+  }
+  return false
+}
+
 export const useAuthStore = create((set, get) => ({
   user: null,
   profile: null,
